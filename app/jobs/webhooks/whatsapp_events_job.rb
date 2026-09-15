@@ -360,7 +360,7 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
       content: content,
       inbox_id: channel.inbox.id,
       source_id: message_id,
-      sender: from_me ? User.where(type: 'SuperAdmin').first || User.first : conversation.contact,
+      sender: from_me ? User.installation_super_admins.first || User.first : conversation.contact,
       sender_type: from_me ? 'User' : 'Contact',
       message_type: from_me ? :outgoing : :incoming,
       created_at: created_at,  # 🎯 Data real da mensagem!

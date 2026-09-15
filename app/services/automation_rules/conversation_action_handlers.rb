@@ -271,7 +271,7 @@ module AutomationRules
 
     def agent_belongs_to_inbox?(agent_ids)
       member_ids = @conversation.inbox.members.pluck(:user_id)
-      assignable_agent_ids = member_ids + User.where(type: 'SuperAdmin').pluck(:id)
+      assignable_agent_ids = member_ids + User.installation_super_admins.pluck(:id)
 
       assignable_agent_ids.include?(agent_ids[0])
     end

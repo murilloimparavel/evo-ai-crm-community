@@ -88,6 +88,9 @@ class User < ApplicationRecord
 
   # Cache fields for display purposes only
   scope :order_by_full_name, -> { order(:name) }
+  # Installation administrators are represented by the auth-service role,
+  # not by the legacy STI `users.type` column.
+  scope :installation_super_admins, -> { joins(:roles).where(roles: { key: 'super_admin' }) }
 
   def conversations
     assigned_conversations

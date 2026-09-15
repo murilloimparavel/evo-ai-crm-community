@@ -260,7 +260,7 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
       content: message_content || '',
       source_id: raw_message_id,
       created_at: Time.zone.at(message_timestamp),
-      sender: incoming? ? @contact : (User.where(type: 'SuperAdmin').first || User.first),
+      sender: incoming? ? @contact : (User.installation_super_admins.first || User.first),
       sender_type: incoming? ? 'Contact' : 'User',
       message_type: incoming? ? :incoming : :outgoing,
       content_attributes: content_attrs
@@ -658,5 +658,4 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
     end
   end
 end
-
 

@@ -276,7 +276,7 @@ class Facebook::Moderation::ActionExecutorService
     agent_bot = find_agent_bot_for_moderation
 
     # Use AgentBot as sender if available, otherwise use first user from account
-    sender = agent_bot || User.where(type: 'SuperAdmin').first || User.first
+    sender = agent_bot || User.installation_super_admins.first || User.first
 
     # Build message attributes that will be used to create the message
     # Mark this message as created by moderation approval to prevent reprocessing
@@ -314,4 +314,3 @@ class Facebook::Moderation::ActionExecutorService
     nil
   end
 end
-

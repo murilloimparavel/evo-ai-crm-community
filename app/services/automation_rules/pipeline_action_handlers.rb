@@ -70,7 +70,7 @@ module AutomationRules
       due_in = params[:due_in]
 
       task = pipeline_item.tasks.create!(
-        created_by_id: User.where(type: 'SuperAdmin').first&.id,
+        created_by_id: User.installation_super_admins.first&.id,
         assigned_to_id: assigned_to_id,
         title: title,
         description: description,

@@ -66,20 +66,46 @@ RSpec.describe Api::V1::Conversations::MessagesController, type: :controller do
   # the freshly reset record (status now 'sent'), which produced a no-op
   # Wisper publish that the EvoFlow listener could not map.
   describe '#retry — no redundant Wisper publish' do
+    let(:current_status) { 'failed' }
+
     before do
       allow(controller).to receive(:permitted_params).and_return(
         ActionController::Parameters.new(id: 7).permit(:id)
       )
+      allow(message_record).to receive(:content_attributes).and_return({ 'whatsapp_auto_retry_count' => 1, 'external_error' => '429' })
       allow(message_record).to receive(:update!)
+      allow(message_record).to receive(:outgoing?).and_return(true)
+      allow(message_record).to receive(:private?).and_return(false)
+      allow(message_record).to receive(:failed?).and_return(true)
+      allow(message_record).to receive(:source_id).and_return(nil)
+      allow(message_record).to receive(:with_lock) { |&block| block.call }
       allow(SendReplyJob).to receive(:perform_now)
       allow(MessageSerializer).to receive(:serialize).and_return({})
       allow(controller).to receive(:success_response)
     end
 
-    it 'AC8: resets to :sent and enqueues SendReplyJob WITHOUT invoking StatusUpdateService' do
-      expect(message_record).to receive(:update!).with(status: :sent, content_attributes: {})
+    it 'claims the failed unsent message and sends it WITHOUT invoking StatusUpdateService' do
+      expect(message_record).to receive(:update!).with(status: :sent, content_attributes: { 'whatsapp_auto_retry_count' => 1 })
       expect(SendReplyJob).to receive(:perform_now).with(7)
       expect(Messages::StatusUpdateService).not_to receive(:new)
+
+      controller.send(:retry)
+    end
+  end
+
+  describe '#retry — rejects messages that were not failed unsent public replies' do
+    before do
+      allow(message_record).to receive(:with_lock) { |&block| block.call }
+      allow(message_record).to receive(:outgoing?).and_return(true)
+      allow(message_record).to receive(:private?).and_return(false)
+      allow(message_record).to receive(:failed?).and_return(false)
+      allow(message_record).to receive(:source_id).and_return('already-accepted')
+    end
+
+    it 'does not send or mutate the message' do
+      expect(message_record).not_to receive(:update!)
+      expect(SendReplyJob).not_to receive(:perform_now)
+      expect(controller).to receive(:error_response)
 
       controller.send(:retry)
     end

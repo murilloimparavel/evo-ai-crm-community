@@ -79,11 +79,24 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
   def retry
     @message = message
 
-    # Reset to :sent directly (StatusUpdateService would reject the no-op
-    # `sent → sent` Wisper publish anyway). Channel webhooks emit the
-    # subsequent delivered/read events through the canonical funnel.
-    @message.update!(status: :sent, content_attributes: {})
+    claimed = @message.with_lock do
+      next false unless @message.outgoing? && !@message.private? && @message.failed? && @message.source_id.blank?
 
+      attrs = @message.content_attributes || {}
+      @message.update!(status: :sent, content_attributes: attrs.except('external_error', 'whatsapp_auto_retry_http_status'))
+      true
+    end
+
+    unless claimed
+      return error_response(
+        ApiErrorCodes::VALIDATION_ERROR,
+        'Only failed, unsent public messages can be retried',
+        status: :unprocessable_entity
+      )
+    end
+
+    # The row lock above makes manual retry an atomic claim; a competing click
+    # cannot enqueue/send the same failed row twice.
     ::SendReplyJob.perform_now(@message.id)
 
     success_response(

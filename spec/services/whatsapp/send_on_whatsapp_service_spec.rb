@@ -330,6 +330,42 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
     end
   end
 
+  describe '#schedule_rate_limit_retry' do
+    let(:provider) { 'evolution' }
+    let(:contact_inbox_source_id) { '5511999999999' }
+    let(:additional_attributes) { nil }
+    let(:retry_message) { instance_double(Message, id: 99, content_attributes: attributes, failed?: true, source_id: nil) }
+    let(:attributes) { {} }
+
+    it 'schedules at most two delayed retries only for an explicit HTTP 429' do
+      provider_service = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_status: 429)
+      job = instance_double(Whatsapp::RetryRateLimitedMessageJob)
+      allow(service).to receive(:message).and_return(retry_message)
+      allow(retry_message).to receive(:with_lock) { |&block| block.call }
+      expect(retry_message).to receive(:update!).with(content_attributes: {
+        'whatsapp_auto_retry_count' => 1,
+        'whatsapp_auto_retry_http_status' => 429
+      })
+      expect(Whatsapp::RetryRateLimitedMessageJob).to receive(:set).with(wait: 5.seconds).and_return(job)
+      expect(job).to receive(:perform_later).with(99, 1)
+
+      service.send(:schedule_rate_limit_retry, provider_service)
+    end
+
+    it 'does not schedule generic failures or retries after the limit' do
+      provider_service = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_status: 503)
+      expect(Whatsapp::RetryRateLimitedMessageJob).not_to receive(:set)
+      service.send(:schedule_rate_limit_retry, provider_service)
+
+      limited_service = described_class.new(message: retry_message)
+      limited_provider = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_status: 429)
+      allow(retry_message).to receive(:with_lock) { |&block| block.call }
+      allow(retry_message).to receive(:content_attributes).and_return({ 'whatsapp_auto_retry_count' => 2 })
+      expect(Whatsapp::RetryRateLimitedMessageJob).not_to receive(:set)
+      limited_service.send(:schedule_rate_limit_retry, limited_provider)
+    end
+  end
+
   describe '#send_template_message — failure routes through StatusUpdateService' do
     let(:provider) { 'evolution_go' }
     let(:contact_inbox_source_id) { '5511999999999' }

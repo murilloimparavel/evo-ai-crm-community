@@ -151,6 +151,35 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     # A terminal status (already failed/read, or a race with the echo webhook)
     # refuses the transition — surface it instead of silently losing the reason.
     Rails.logger.warn "[WhatsApp] Message #{message.id} not remarked as failed (status #{message.status} is terminal)" unless marked
+    schedule_rate_limit_retry(provider) if marked
+  end
+
+  # HTTP 429 is an explicit provider rejection, so retrying cannot duplicate an
+  # accepted message. Do not automatically retry timeouts or generic 5xx: the
+  # provider may have accepted the send before the response was lost.
+  def schedule_rate_limit_retry(provider)
+    return unless provider.last_delivery_status.to_i == 429
+
+    next_attempt = nil
+    eligible = message.with_lock do
+      next false unless message.failed? && message.source_id.blank?
+
+      attrs = message.content_attributes || {}
+      retry_count = attrs['whatsapp_auto_retry_count'].to_i
+      next false if retry_count >= 2
+
+      next_attempt = retry_count + 1
+      message.update!(content_attributes: attrs.merge(
+        'whatsapp_auto_retry_count' => next_attempt,
+        'whatsapp_auto_retry_http_status' => 429
+      ))
+      true
+    end
+    return unless eligible
+
+    wait = next_attempt == 1 ? 5.seconds : 30.seconds
+    Whatsapp::RetryRateLimitedMessageJob.set(wait: wait).perform_later(message.id, next_attempt)
+    Rails.logger.info("[WhatsApp] scheduled rate-limit retry message_id=#{message.id} attempt=#{next_attempt}/2 wait_seconds=#{wait.to_i}")
   end
 
   # Defensive ordering only: today no provider both records an error and flags

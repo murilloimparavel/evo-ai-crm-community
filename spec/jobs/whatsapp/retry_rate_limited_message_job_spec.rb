@@ -4,7 +4,12 @@ require 'rails_helper'
 
 RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
   let(:attributes) do
-    { 'whatsapp_auto_retry_count' => 1, 'whatsapp_auto_retry_http_status' => 429, 'whatsapp_auto_retry_token' => 'retry-token-1', 'external_error' => 'HTTP 429' }
+    {
+      'whatsapp_auto_retry_count' => 1,
+      'whatsapp_auto_retry_http_status' => 429,
+      'whatsapp_auto_retry_token' => 'retry-token-1',
+      'external_error' => 'HTTP 429'
+    }
   end
   let(:message) do
     instance_double(Message,
@@ -22,7 +27,11 @@ RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
     allow(message).to receive(:with_lock) { |&block| block.call }
     expect(message).to receive(:update!).with(
       status: :sent,
-      content_attributes: { 'whatsapp_auto_retry_count' => 1, 'whatsapp_auto_retry_http_status' => 429, 'whatsapp_auto_retry_token' => 'retry-token-1' }
+      content_attributes: {
+        'whatsapp_auto_retry_count' => 1,
+        'whatsapp_auto_retry_http_status' => 429,
+        'whatsapp_auto_retry_token' => 'retry-token-1'
+      }
     )
     expect(SendReplyJob).to receive(:perform_now).with(44)
 
@@ -42,7 +51,9 @@ RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
   it 'does not send when a newer retry replaced the queued job token' do
     allow(Message).to receive(:find_by).with(id: 44).and_return(message)
     allow(message).to receive(:with_lock) { |&block| block.call }
-    allow(message).to receive(:content_attributes).and_return(attributes.merge('whatsapp_auto_retry_token' => 'newer-token'))
+    allow(message).to receive(:content_attributes).and_return(
+      attributes.merge('whatsapp_auto_retry_token' => 'newer-token')
+    )
 
     expect(message).not_to receive(:update!)
     expect(SendReplyJob).not_to receive(:perform_now)

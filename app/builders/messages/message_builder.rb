@@ -1,4 +1,6 @@
 class Messages::MessageBuilder
+  # Stay below the gateway's 100 MiB request limit, with room for multipart overhead.
+  MAX_ATTACHMENT_SIZE_BYTES = 90 * 1024 * 1024
   include ::FileTypeHelper
   attr_reader :message
 
@@ -9,6 +11,7 @@ class Messages::MessageBuilder
     @user = user
     @message_type = params[:message_type] || 'outgoing'
     @attachments = params[:attachments]
+    @send_as_document = ActiveModel::Type::Boolean.new.cast(params[:send_as_document])
     @is_recorded_audio = params[:is_recorded_audio]
     @automation_rule = content_attributes&.dig(:automation_rule_id)
     return unless params.instance_of?(ActionController::Parameters)
@@ -65,12 +68,26 @@ class Messages::MessageBuilder
   def process_attachments
     return if @attachments.blank?
 
+    attachment_sizes = @attachments.map { |uploaded_attachment| attachment_size(uploaded_attachment).to_i }
+    if attachment_sizes.any? { |size| size > MAX_ATTACHMENT_SIZE_BYTES }
+      raise ActionController::BadRequest,
+            "Attachment exceeds the maximum size of #{MAX_ATTACHMENT_SIZE_BYTES} bytes"
+    end
+
+    total_size = attachment_sizes.sum
+    if total_size > MAX_ATTACHMENT_SIZE_BYTES
+      raise ActionController::BadRequest,
+            "Attachments exceed the maximum total size of #{MAX_ATTACHMENT_SIZE_BYTES} bytes"
+    end
+
     @attachments.each do |uploaded_attachment|
       attachment = @message.attachments.build(
         file: uploaded_attachment
       )
       attachment.meta = process_metadata(uploaded_attachment)
-      attachment.file_type = if uploaded_attachment.is_a?(String)
+      attachment.file_type = if @send_as_document
+                               :file
+                             elsif uploaded_attachment.is_a?(String)
                                file_type_by_signed_id(
                                  uploaded_attachment
                                )
@@ -78,6 +95,13 @@ class Messages::MessageBuilder
                                file_type(uploaded_attachment&.content_type)
                              end
     end
+  end
+
+  def attachment_size(uploaded_attachment)
+    return ActiveStorage::Blob.find_signed(uploaded_attachment)&.byte_size if uploaded_attachment.is_a?(String)
+    return uploaded_attachment.size if uploaded_attachment.respond_to?(:size)
+
+    0
   end
 
   def process_metadata(attachment) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity

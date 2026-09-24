@@ -161,6 +161,7 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     return unless provider.last_delivery_status.to_i == 429
 
     next_attempt = nil
+    retry_token = SecureRandom.uuid
     eligible = message.with_lock do
       next false unless message.failed? && message.source_id.blank?
 
@@ -171,14 +172,15 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
       next_attempt = retry_count + 1
       message.update!(content_attributes: attrs.merge(
         'whatsapp_auto_retry_count' => next_attempt,
-        'whatsapp_auto_retry_http_status' => 429
+        'whatsapp_auto_retry_http_status' => 429,
+        'whatsapp_auto_retry_token' => retry_token
       ))
       true
     end
     return unless eligible
 
     wait = next_attempt == 1 ? 5.seconds : 30.seconds
-    Whatsapp::RetryRateLimitedMessageJob.set(wait: wait).perform_later(message.id, next_attempt)
+    Whatsapp::RetryRateLimitedMessageJob.set(wait: wait).perform_later(message.id, next_attempt, retry_token)
     Rails.logger.info("[WhatsApp] scheduled rate-limit retry message_id=#{message.id} attempt=#{next_attempt}/2 wait_seconds=#{wait.to_i}")
   end
 

@@ -83,7 +83,7 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
       next false unless @message.outgoing? && !@message.private? && @message.failed? && @message.source_id.blank?
 
       attrs = @message.content_attributes || {}
-      @message.update!(status: :sent, content_attributes: attrs.except('external_error', 'whatsapp_auto_retry_http_status'))
+      @message.update!(status: :sent, content_attributes: attrs.except('external_error', 'whatsapp_auto_retry_http_status', 'whatsapp_auto_retry_count', 'whatsapp_auto_retry_token'))
       true
     end
 

@@ -344,10 +344,11 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
       allow(retry_message).to receive(:with_lock) { |&block| block.call }
       expect(retry_message).to receive(:update!).with(content_attributes: {
         'whatsapp_auto_retry_count' => 1,
-        'whatsapp_auto_retry_http_status' => 429
+        'whatsapp_auto_retry_http_status' => 429,
+        'whatsapp_auto_retry_token' => kind_of(String)
       })
       expect(Whatsapp::RetryRateLimitedMessageJob).to receive(:set).with(wait: 5.seconds).and_return(job)
-      expect(job).to receive(:perform_later).with(99, 1)
+      expect(job).to receive(:perform_later).with(99, 1, kind_of(String))
 
       service.send(:schedule_rate_limit_retry, provider_service)
     end

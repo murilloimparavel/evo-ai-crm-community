@@ -72,7 +72,7 @@ RSpec.describe Api::V1::Conversations::MessagesController, type: :controller do
       allow(controller).to receive(:permitted_params).and_return(
         ActionController::Parameters.new(id: 7).permit(:id)
       )
-      allow(message_record).to receive(:content_attributes).and_return({ 'whatsapp_auto_retry_count' => 1, 'external_error' => '429' })
+      allow(message_record).to receive(:content_attributes).and_return({ 'whatsapp_auto_retry_count' => 1, 'whatsapp_auto_retry_token' => 'retry-token', 'external_error' => '429' })
       allow(message_record).to receive(:update!)
       allow(message_record).to receive(:outgoing?).and_return(true)
       allow(message_record).to receive(:private?).and_return(false)
@@ -85,7 +85,7 @@ RSpec.describe Api::V1::Conversations::MessagesController, type: :controller do
     end
 
     it 'claims the failed unsent message and sends it WITHOUT invoking StatusUpdateService' do
-      expect(message_record).to receive(:update!).with(status: :sent, content_attributes: { 'whatsapp_auto_retry_count' => 1 })
+      expect(message_record).to receive(:update!).with(status: :sent, content_attributes: {})
       expect(SendReplyJob).to receive(:perform_now).with(7)
       expect(Messages::StatusUpdateService).not_to receive(:new)
 

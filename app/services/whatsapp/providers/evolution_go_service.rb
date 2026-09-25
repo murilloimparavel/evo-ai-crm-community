@@ -1,6 +1,12 @@
 require 'base64'
 
 class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
+  PRESENCE_STATUS_BY_EVENT = {
+    'conversation.typing_on' => 'composing',
+    'conversation.recording' => 'recording',
+    'conversation.typing_off' => 'paused'
+  }.freeze
+
   def send_message(phone_number, message)
     @message = message
     @phone_number = phone_number
@@ -30,6 +36,27 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
     # Evolution Go API doesn't have template syncing like WhatsApp Cloud
     # Templates are managed internally via create_template
     Rails.logger.debug "Evolution Go: Templates are managed internally, no external sync needed"
+  end
+
+  # Mirrors CRM typing status to Evolution Go's chat-presence endpoint.
+  def toggle_typing_status(number, event_name)
+    state = evolution_go_presence_for(event_name)
+    return false if state.blank? || number.blank? || api_base_path.blank?
+
+    response = HTTParty.post(
+      "#{api_base_path}/message/presence",
+      headers: instance_headers,
+      body: { number: number.to_s.delete('+'), state: state }.to_json,
+      timeout: 5
+    )
+
+    return true if response.success?
+
+    Rails.logger.warn("Evolution Go: chat presence failed with HTTP #{response.code}")
+    false
+  rescue StandardError => e
+    Rails.logger.warn("Evolution Go: chat presence failed (#{e.class})")
+    false
   end
 
   def create_template(template_data)
@@ -198,6 +225,10 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
   end
 
   private
+
+  def evolution_go_presence_for(event_name)
+    PRESENCE_STATUS_BY_EVENT[event_name.to_s]
+  end
 
   def api_base_path
     api_url = whatsapp_channel.provider_config['api_url'].presence || GlobalConfigService.load('EVOLUTION_GO_API_URL', '').to_s.strip

@@ -1,6 +1,12 @@
 require 'base64'
 
 class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
+  PRESENCE_STATUS_BY_EVENT = {
+    'conversation.typing_on' => 'composing',
+    'conversation.recording' => 'recording',
+    'conversation.typing_off' => 'paused'
+  }.freeze
+
   def send_message(phone_number, message)
     @message = message
     @phone_number = phone_number
@@ -49,6 +55,27 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     # Evolution API doesn't have template syncing like WhatsApp Cloud
     # Templates are managed internally via create_template
     Rails.logger.debug "Evolution: Templates are managed internally, no external sync needed"
+  end
+
+  # Mirrors CRM typing status to the WhatsApp chat through Evolution API.
+  def toggle_typing_status(number, event_name)
+    presence = evolution_presence_for(event_name)
+    return false if presence.blank? || number.blank? || api_base_path.blank? || instance_name.blank?
+
+    response = HTTParty.post(
+      "#{api_base_path}/chat/sendPresence/#{instance_name}",
+      headers: api_headers,
+      body: { number: number.to_s.delete('+'), presence: presence }.to_json,
+      timeout: 5
+    )
+
+    return true if response.success?
+
+    Rails.logger.warn("Evolution API: chat presence failed with HTTP #{response.code}")
+    false
+  rescue StandardError => e
+    Rails.logger.warn("Evolution API: chat presence failed (#{e.class})")
+    false
   end
 
   def create_template(template_data)
@@ -259,6 +286,10 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   end
 
   private
+
+  def evolution_presence_for(event_name)
+    PRESENCE_STATUS_BY_EVENT[event_name.to_s]
+  end
 
   def try_logout_instance(instance_name)
     logout_url = "#{api_base_path}/instance/logout/#{instance_name}"

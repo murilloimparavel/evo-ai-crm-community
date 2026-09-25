@@ -85,6 +85,30 @@ RSpec.describe Whatsapp::Providers::EvolutionService do
     end
   end
 
+  describe '#toggle_typing_status' do
+    it 'sends the composing indicator to the conversation chat' do
+      allow(HTTParty).to receive(:post).and_return(instance_double(HTTParty::Response, success?: true))
+
+      expect(service.toggle_typing_status(phone_number, 'conversation.typing_on')).to be(true)
+      expect(HTTParty).to have_received(:post) do |url, options|
+        expect(url).to eq('https://evo.example.com/chat/sendPresence/test-instance')
+        expect(JSON.parse(options[:body])).to eq('number' => '5511999999999', 'presence' => 'composing')
+        expect(options[:headers]['apikey']).to eq('test-token')
+      end
+    end
+
+    it 'maps typing off to paused and ignores unsupported events without a request' do
+      allow(HTTParty).to receive(:post).and_return(instance_double(HTTParty::Response, success?: true))
+
+      expect(service.toggle_typing_status(phone_number, 'conversation.typing_off')).to be(true)
+      expect(HTTParty).to have_received(:post).once do |_url, options|
+        expect(JSON.parse(options[:body])['presence']).to eq('paused')
+      end
+      expect(service.toggle_typing_status(phone_number, 'unknown.event')).to be(false)
+      expect(HTTParty).to have_received(:post).once
+    end
+  end
+
   describe '#send_text_message (HTML to WhatsApp formatting)' do
     it 'converts bold HTML to WhatsApp bold' do
       message = instance_double('Message', content: '<strong>Hello</strong> World', attachments: double(present?: false), content_type: 'text')

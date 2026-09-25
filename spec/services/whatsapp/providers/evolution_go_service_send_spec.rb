@@ -6,7 +6,13 @@ require 'rails_helper'
 # send without an ID must not read as a failure.
 RSpec.describe Whatsapp::Providers::EvolutionGoService do
   let(:whatsapp_channel) do
-    instance_double(Channel::Whatsapp, provider_config: { 'api_key' => 'token', 'instance_name' => 'inst' })
+    instance_double(
+      Channel::Whatsapp,
+      provider_config: {
+        'api_key' => 'token', 'instance_name' => 'inst', 'api_url' => 'https://evo-go.example.com',
+        'instance_token' => 'instance-token'
+      }
+    )
   end
   let(:service) { described_class.new(whatsapp_channel: whatsapp_channel) }
 
@@ -43,6 +49,31 @@ RSpec.describe Whatsapp::Providers::EvolutionGoService do
 
       expect { service.send(:process_evolution_go_response, response) }
         .to raise_error(/HTTP 500/)
+    end
+  end
+
+  describe '#toggle_typing_status' do
+    it 'uses Evolution Go chat presence contract and instance authentication' do
+      allow(HTTParty).to receive(:post).and_return(instance_double(HTTParty::Response, success?: true))
+
+      expect(service.toggle_typing_status('+5511999999999', 'conversation.typing_on')).to be(true)
+      expect(HTTParty).to have_received(:post) do |url, options|
+        expect(url).to eq('https://evo-go.example.com/message/presence')
+        expect(JSON.parse(options[:body])).to eq(
+          'number' => '5511999999999', 'state' => 'composing'
+        )
+        expect(options[:headers]['apikey']).to eq('instance-token')
+      end
+    end
+
+    it 'maps typing off to paused and recording to the audio indicator' do
+      allow(HTTParty).to receive(:post).and_return(instance_double(HTTParty::Response, success?: true))
+
+      expect(service.toggle_typing_status('5511999999999', 'conversation.typing_off')).to be(true)
+      expect(service.send(:evolution_go_presence_for, 'conversation.recording')).to eq('recording')
+      expect(HTTParty).to have_received(:post).once do |_url, options|
+        expect(JSON.parse(options[:body])['state']).to eq('paused')
+      end
     end
   end
 

@@ -137,5 +137,26 @@ RSpec.describe 'Upload, callbacks and search RBAC', type: :request do
 
       expect(response).to have_http_status(:ok)
     end
+
+    it 'searches globally by a partial phone number' do
+      grant_permissions('contacts.read', 'conversations.read')
+      channel = Channel::WebWidget.create!(website_url: 'https://search.example.com')
+      inbox = Inbox.create!(name: 'Search Spec Inbox', channel: channel)
+      user.inbox_members.create!(inbox: inbox)
+      contact = Contact.create!(name: 'Phone Search Contact', phone_number: '+155557381234')
+      contact_inbox = ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8))
+      conversation = Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox)
+
+      get '/api/v1/search', params: { q: '5738' }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig('payload', 'contacts')).to include(hash_including('id' => contact.id))
+
+      get '/api/v1/search/conversations', params: { q: '5738' }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig('payload', 'conversations'))
+        .to include(hash_including('id' => conversation.id))
+    end
   end
 end

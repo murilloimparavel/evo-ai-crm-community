@@ -22,6 +22,11 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
     user = Current.user || @resource
     mb = Messages::MessageBuilder.new(user, @conversation, params)
     @message = mb.perform
+    Conversations::AssignOnAgentReplyService.new(
+      conversation: @conversation,
+      message: @message,
+      user: user
+    ).perform
     attach_canned_response_files if params[:canned_response_id].present?
 
     success_response(

@@ -378,12 +378,13 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           post :create, params: {
             config_type: 'evolution',
             app_config: {
-              EVOLUTION_API_URL: 'https://api.example.com',
+              EVOLUTION_API_URL: 'https://api.example.com/manager/',
               EVOLUTION_ADMIN_SECRET: 'secret-xyz'
             }
           }, format: :json
 
           expect(response).to have_http_status(:ok)
+          expect(InstallationConfig.find_by(name: 'EVOLUTION_API_URL').value).to eq('https://api.example.com')
         end
       end
 

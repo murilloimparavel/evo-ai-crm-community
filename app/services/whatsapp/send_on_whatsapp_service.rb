@@ -158,7 +158,7 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
   # accepted message. Do not automatically retry timeouts or generic 5xx: the
   # provider may have accepted the send before the response was lost.
   def schedule_rate_limit_retry(provider)
-    return unless provider.last_delivery_status.to_i == 429
+    return unless provider.respond_to?(:last_delivery_status) && provider.last_delivery_status.to_i == 429
 
     next_attempt = nil
     retry_token = SecureRandom.uuid
@@ -187,7 +187,7 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
   # Defensive ordering only: today no provider both records an error and flags
   # the message, and a concrete error would beat the generic reason.
   def send_failure_reason(result, provider, fallback_reason)
-    provider_error = provider.last_delivery_error.presence
+    provider_error = provider.last_delivery_error.presence if provider.respond_to?(:last_delivery_error)
     return provider_error if provider_error
     return UNSUPPORTED_CONTENT_REASON if result.nil? && message.is_unsupported.present?
 

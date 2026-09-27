@@ -89,11 +89,13 @@ module Api
           missing = missing_required_keys(config_type, allowed_keys)
           return missing_required_response(missing) if missing.any?
 
-          save_configs(allowed_keys)
+          begin
+            save_configs(allowed_keys)
+          rescue Whatsapp::EvolutionApiUrl::InvalidUrl => e
+            return error_response(ApiErrorCodes::INVALID_PARAMETER, e.message, status: :bad_request)
+          end
           configs = build_config_response(allowed_keys)
           success_response(data: { config_type: config_type, configs: configs }, message: 'Configuration updated successfully')
-        rescue Whatsapp::EvolutionApiUrl::InvalidUrl => e
-          error_response(ApiErrorCodes::INVALID_PARAMETER, e.message, status: :bad_request)
         end
 
         def destroy

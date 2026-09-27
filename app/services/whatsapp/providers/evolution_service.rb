@@ -1,5 +1,4 @@
 require 'base64'
-require 'uri'
 
 class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   PRESENCE_STATUS_BY_EVENT = {
@@ -349,15 +348,10 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
   def api_base_path
     return @api_base_path if defined?(@api_base_path)
 
-    api_url = channel_config_value('api_url').to_s.strip.presence || global_evolution_setting('EVOLUTION_API_URL').to_s.strip
-    return @api_base_path = nil if api_url.blank?
-
-    uri = URI.parse(api_url)
-    return @api_base_path = nil unless uri.is_a?(URI::HTTP) && uri.host.present? && (1..65_535).cover?(uri.port)
-    return @api_base_path = nil if uri.userinfo.present? || uri.query.present? || uri.fragment.present?
-
-    @api_base_path = uri.to_s.sub(%r{/+\z}, '')
-  rescue URI::InvalidURIError
+    api_url = channel_config_value('api_url').presence || global_evolution_setting('EVOLUTION_API_URL')
+    @api_base_path = Whatsapp::EvolutionApiUrl.normalize(api_url)
+  rescue Whatsapp::EvolutionApiUrl::InvalidUrl => e
+    Rails.logger.warn("[Evolution] invalid API URL channel_id=#{whatsapp_channel.id} error=#{e.class}")
     @api_base_path = nil
   end
 

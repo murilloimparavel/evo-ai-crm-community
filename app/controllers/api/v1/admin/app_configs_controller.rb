@@ -92,6 +92,8 @@ module Api
           save_configs(allowed_keys)
           configs = build_config_response(allowed_keys)
           success_response(data: { config_type: config_type, configs: configs }, message: 'Configuration updated successfully')
+        rescue Whatsapp::EvolutionApiUrl::InvalidUrl => e
+          error_response(ApiErrorCodes::INVALID_PARAMETER, e.message, status: :bad_request)
         end
 
         def destroy
@@ -160,6 +162,8 @@ module Api
 
               value = config_params[key]
               next if preserve_existing?(key, value)
+
+              value = Whatsapp::EvolutionApiUrl.normalize(value) if key == 'EVOLUTION_API_URL'
 
               GlobalConfig.set(key, value)
             end

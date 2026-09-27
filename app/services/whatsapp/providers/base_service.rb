@@ -35,17 +35,21 @@ class Whatsapp::Providers::BaseService
   def error_message(response)
     parsed = response.respond_to?(:parsed_response) ? response.parsed_response : nil
     status = response.respond_to?(:code) ? response.code : nil
-    return "Provider returned HTTP #{status}" unless parsed.is_a?(Hash)
+    details = if parsed.is_a?(Hash)
+                error = parsed['error']
+                provider_message = if error.is_a?(Hash)
+                                     error['message']
+                                   elsif error.is_a?(String)
+                                     error
+                                   end
+                provider_code = error.is_a?(Hash) ? error['code'] : nil
+                provider_message.presence || provider_code.presence || "Provider returned HTTP #{status}"
+              elsif response.respond_to?(:body) && response.body.present?
+                response.body
+              else
+                "Provider returned HTTP #{status}"
+              end
 
-    error = parsed['error']
-    provider_message = if error.is_a?(Hash)
-                         error['message']
-                       elsif error.is_a?(String)
-                         error
-                       end
-    provider_code = error.is_a?(Hash) ? error['code'] : nil
-    details = [provider_code, provider_message].compact.map(&:to_s).join(': ')
-    details = "Provider returned HTTP #{status}" if details.blank?
     details.gsub(/[\r\n\t]/, ' ')
       .gsub(/Bearer\s+[A-Za-z0-9._-]+/i, 'Bearer [redacted]')
       .gsub(/\+?\d[\d\s().-]{6,}\d/, '[number]')

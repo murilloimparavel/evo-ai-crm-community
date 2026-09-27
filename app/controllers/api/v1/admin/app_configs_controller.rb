@@ -1,3 +1,5 @@
+require_relative '../../../../services/whatsapp/evolution_api_url'
+
 module Api
   module V1
     module Admin

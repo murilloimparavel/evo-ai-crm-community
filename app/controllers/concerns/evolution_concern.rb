@@ -13,7 +13,9 @@ module EvolutionConcern
     url = channel&.provider_config&.dig('api_url').presence ||
           raw_params[:api_url].presence ||
           GlobalConfigService.load('EVOLUTION_API_URL', '').to_s.strip
-    url.presence
+    Whatsapp::EvolutionApiUrl.normalize(url)
+  rescue Whatsapp::EvolutionApiUrl::InvalidUrl
+    nil
   end
 
   def evolution_admin_token_for(channel, raw_params = {})

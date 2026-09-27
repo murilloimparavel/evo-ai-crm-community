@@ -378,12 +378,13 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           post :create, params: {
             config_type: 'evolution',
             app_config: {
-              EVOLUTION_API_URL: 'https://api.example.com',
+              EVOLUTION_API_URL: 'https://api.example.com/manager/',
               EVOLUTION_ADMIN_SECRET: 'secret-xyz'
             }
           }, format: :json
 
-          expect(response).to have_http_status(:ok)
+          expect(response).to have_http_status(:ok), response.body
+          expect(InstallationConfig.find_by(name: 'EVOLUTION_API_URL').value).to eq('https://api.example.com')
         end
       end
 
@@ -402,7 +403,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
         it 'returns error response' do
           post :create, params: { config_type: 'smtp' }, format: :json
 
-          expect(response).to have_http_status(:unprocessable_entity).or have_http_status(:bad_request)
+          expect(response).to have_http_status(:unprocessable_entity).or(have_http_status(:bad_request)), response.body
           body = JSON.parse(response.body)
           expect(body['success']).to be false
         end
@@ -494,7 +495,7 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
             it 'accepts save when all required keys are provided' do
               post :create, params: { config_type: config_type, app_config: full_payload }, format: :json
 
-              expect(response).to have_http_status(:ok)
+              expect(response).to have_http_status(:ok), response.body
               expect(InstallationConfig.find_by(name: first_required).value)
                 .to eq(full_payload[first_required.to_sym])
             end

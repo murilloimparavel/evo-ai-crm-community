@@ -1,3 +1,5 @@
+require_relative '../../../../services/whatsapp/evolution_api_url'
+
 module Api
   module V1
     module Admin
@@ -89,7 +91,11 @@ module Api
           missing = missing_required_keys(config_type, allowed_keys)
           return missing_required_response(missing) if missing.any?
 
-          save_configs(allowed_keys)
+          begin
+            save_configs(allowed_keys)
+          rescue ::Whatsapp::EvolutionApiUrl::InvalidUrl => e
+            return error_response(ApiErrorCodes::INVALID_PARAMETER, e.message, status: :bad_request)
+          end
           configs = build_config_response(allowed_keys)
           success_response(data: { config_type: config_type, configs: configs }, message: 'Configuration updated successfully')
         end
@@ -160,6 +166,8 @@ module Api
 
               value = config_params[key]
               next if preserve_existing?(key, value)
+
+              value = ::Whatsapp::EvolutionApiUrl.normalize(value) if key == 'EVOLUTION_API_URL'
 
               GlobalConfig.set(key, value)
             end

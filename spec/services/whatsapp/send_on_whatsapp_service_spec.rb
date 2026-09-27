@@ -339,7 +339,7 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
 
     it 'schedules at most two delayed retries only for an explicit HTTP 429' do
       provider_service = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_status: 429)
-      job = instance_double(Whatsapp::RetryRateLimitedMessageJob)
+      job = double('configured retry job')
       allow(service).to receive(:message).and_return(retry_message)
       allow(retry_message).to receive(:with_lock) { |&block| block.call }
       expect(retry_message).to receive(:update!).with(content_attributes: {

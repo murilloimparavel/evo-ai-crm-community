@@ -33,18 +33,23 @@ class Whatsapp::Providers::BaseService
   # Meta Graph shape as the default; a non-JSON body (proxy 502) parses to a
   # String, which has no #dig — fall back to the raw body.
   def error_message(response)
-    parsed = response.parsed_response
-    return "Provider returned HTTP #{response.code}" unless parsed.is_a?(Hash)
+    parsed = response.respond_to?(:parsed_response) ? response.parsed_response : nil
+    status = response.respond_to?(:code) ? response.code : nil
+    details = if parsed.is_a?(Hash)
+                error = parsed['error']
+                provider_message = if error.is_a?(Hash)
+                                     error['message']
+                                   elsif error.is_a?(String)
+                                     error
+                                   end
+                provider_code = error.is_a?(Hash) ? error['code'] : nil
+                provider_message.presence || provider_code.presence || "Provider returned HTTP #{status}"
+              elsif response.respond_to?(:body) && response.body.present?
+                response.body
+              else
+                "Provider returned HTTP #{status}"
+              end
 
-    error = parsed['error']
-    provider_message = if error.is_a?(Hash)
-                         error['message']
-                       elsif error.is_a?(String)
-                         error
-                       end
-    provider_code = error.is_a?(Hash) ? error['code'] : nil
-    details = [provider_code, provider_message].compact.map(&:to_s).join(': ')
-    details = "Provider returned HTTP #{response.code}" if details.blank?
     details.gsub(/[\r\n\t]/, ' ')
       .gsub(/Bearer\s+[A-Za-z0-9._-]+/i, 'Bearer [redacted]')
       .gsub(/\+?\d[\d\s().-]{6,}\d/, '[number]')
@@ -65,8 +70,9 @@ class Whatsapp::Providers::BaseService
   def handle_error(response)
     # Provider responses can contain contact data and echoed payloads. Log only
     # the HTTP status and a bounded, sanitized provider error for diagnosis.
-    Rails.logger.error("[WhatsAppProvider] response_status=#{response.code} error=#{error_message(response)}")
-    @last_delivery_status = response.code.to_i
+    status = response.respond_to?(:code) ? response.code : nil
+    Rails.logger.error("[WhatsAppProvider] response_status=#{status} error=#{error_message(response)}")
+    @last_delivery_status = status.to_i
     # Records only; SendOnWhatsappService owns the status marking.
     # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/#sample-response
     @last_delivery_error = error_message(response)

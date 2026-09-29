@@ -53,8 +53,6 @@ class Whatsapp::Providers::BaseService
                 else
                   provider_code.presence || "Provider returned HTTP #{status}"
                 end
-              elsif response.respond_to?(:body) && response.body.present?
-                response.body
               else
                 "Provider returned HTTP #{status}"
               end

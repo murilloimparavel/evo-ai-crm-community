@@ -225,6 +225,7 @@ on:
       - 'app/services/whatsapp/providers/whatsapp_360_dialog_service.rb'
       - 'app/services/messages/status_update_service.rb'
       - 'app/jobs/send_reply_job.rb'
+      - 'spec/services/whatsapp/providers/base_service_spec.rb'
       - 'spec/services/whatsapp/send_on_whatsapp_service_spec.rb'
       - 'spec/services/whatsapp/providers/whatsapp_cloud_service_spec.rb'
       - 'spec/services/whatsapp/providers/evolution_service_spec.rb'
@@ -407,6 +408,7 @@ jobs:
             spec/lib/evolution_hub/client_public_connect_spec.rb \
             spec/listeners/action_cable_listener_hub_channel_spec.rb \
             spec/lib/meta_base_url_spec.rb \
+            spec/services/whatsapp/providers/base_service_spec.rb \
             spec/services/whatsapp/send_on_whatsapp_service_spec.rb \
             spec/services/whatsapp/providers/whatsapp_cloud_service_spec.rb \
             spec/services/whatsapp/providers/evolution_service_spec.rb \

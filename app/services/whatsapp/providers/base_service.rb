@@ -53,6 +53,8 @@ class Whatsapp::Providers::BaseService
                 else
                   provider_code.presence || "Provider returned HTTP #{status}"
                 end
+              elsif preserve_non_json_error_body? && response.respond_to?(:body) && response.body.present?
+                response.body
               else
                 "Provider returned HTTP #{status}"
               end
@@ -81,6 +83,10 @@ class Whatsapp::Providers::BaseService
     end
   end
   private :extract_provider_error_detail
+
+  def preserve_non_json_error_body?
+    false
+  end
 
   def process_response(response)
     parsed_response = response.parsed_response

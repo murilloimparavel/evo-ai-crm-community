@@ -29,6 +29,10 @@ module Whatsapp
         end
       end
 
+      def preserve_non_json_error_body?
+        true
+      end
+
       def send_template(phone_number, template_info)
         response = HTTParty.post(
           "#{phone_id_path}/messages",

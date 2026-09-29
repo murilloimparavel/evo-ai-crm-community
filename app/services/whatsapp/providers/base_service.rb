@@ -45,7 +45,11 @@ class Whatsapp::Providers::BaseService
                                    extract_provider_error_detail(error)
 
                 if provider_message.present?
-                  provider_code.present? ? "#{provider_code}: #{provider_message}" : provider_message
+                  if provider_code.present? && !provider_message.include?(provider_code.to_s)
+                    "#{provider_code}: #{provider_message}"
+                  else
+                    provider_message
+                  end
                 else
                   provider_code.presence || "Provider returned HTTP #{status}"
                 end

@@ -37,13 +37,18 @@ class Whatsapp::Providers::BaseService
     status = response.respond_to?(:code) ? response.code : nil
     details = if parsed.is_a?(Hash)
                 error = parsed['error']
-                provider_message = if error.is_a?(Hash)
-                                     error['message']
-                                   elsif error.is_a?(String)
-                                     error
-                                   end
                 provider_code = error.is_a?(Hash) ? error['code'] : nil
-                provider_message.presence || provider_code.presence || "Provider returned HTTP #{status}"
+                provider_message = extract_provider_error_detail(parsed['response']) ||
+                                   extract_provider_error_detail(parsed['message']) ||
+                                   extract_provider_error_detail(parsed['details']) ||
+                                   extract_provider_error_detail(parsed['detail']) ||
+                                   extract_provider_error_detail(error)
+
+                if provider_message.present?
+                  provider_code.present? ? "#{provider_code}: #{provider_message}" : provider_message
+                else
+                  provider_code.presence || "Provider returned HTTP #{status}"
+                end
               elsif response.respond_to?(:body) && response.body.present?
                 response.body
               else
@@ -52,10 +57,28 @@ class Whatsapp::Providers::BaseService
 
     details.gsub(/[\r\n\t]/, ' ')
       .gsub(/Bearer\s+[A-Za-z0-9._-]+/i, 'Bearer [redacted]')
+      .gsub(/\b(api[_ -]?key|admin[_ -]?token|access[_ -]?token|authorization)\b\s*[:=]\s*["']?[^,\s"'}]+/i, '\\1=[redacted]')
+      .gsub(/\b[\w.+-]+@(?:s\.whatsapp\.net|g\.us|lid)\b/i, '[recipient]')
       .gsub(/\+?\d[\d\s().-]{6,}\d/, '[number]')
       .gsub(/[A-Za-z0-9_-]{40,}/, '[redacted]')
       .truncate(240)
   end
+
+  def extract_provider_error_detail(value)
+    case value
+    when String
+      value.presence
+    when Array
+      value.filter_map { |item| extract_provider_error_detail(item) }.join('; ').presence
+    when Hash
+      %w[message detail details error].each do |key|
+        detail = extract_provider_error_detail(value[key])
+        return detail if detail.present?
+      end
+      nil
+    end
+  end
+  private :extract_provider_error_detail
 
   def process_response(response)
     parsed_response = response.parsed_response
@@ -71,11 +94,12 @@ class Whatsapp::Providers::BaseService
     # Provider responses can contain contact data and echoed payloads. Log only
     # the HTTP status and a bounded, sanitized provider error for diagnosis.
     status = response.respond_to?(:code) ? response.code : nil
-    Rails.logger.error("[WhatsAppProvider] response_status=#{status} error=#{error_message(response)}")
+    delivery_error = error_message(response)
+    Rails.logger.error("[WhatsAppProvider] response_status=#{status} error=#{delivery_error}")
     @last_delivery_status = status.to_i
     # Records only; SendOnWhatsappService owns the status marking.
     # https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/#sample-response
-    @last_delivery_error = error_message(response)
+    @last_delivery_error = delivery_error
   end
 
   def create_buttons(items)

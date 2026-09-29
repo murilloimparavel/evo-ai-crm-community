@@ -29,5 +29,43 @@ RSpec.describe Whatsapp::Providers::BaseService do
 
       expect(service.last_delivery_error).to eq('Provider returned HTTP 503')
     end
+
+    it 'keeps nested provider details when the top-level error is generic' do
+      response = instance_double(
+        HTTParty::Response,
+        success?: false,
+        code: 400,
+        parsed_response: {
+          'status' => 400,
+          'error' => 'Bad Request',
+          'response' => { 'message' => ['The instance is not connected'] }
+        },
+        body: ''
+      )
+
+      expect(Rails.logger).to receive(:error).with('[WhatsAppProvider] response_status=400 error=The instance is not connected')
+      service.send(:process_response, response)
+
+      expect(service.last_delivery_status).to eq(400)
+      expect(service.last_delivery_error).to eq('The instance is not connected')
+    end
+
+    it 'redacts phone numbers and API keys in nested provider details' do
+      response = instance_double(
+        HTTParty::Response,
+        success?: false,
+        code: 400,
+        parsed_response: {
+          'error' => 'Bad Request',
+          'response' => { 'message' => 'Invalid recipient +15551234567; apikey=123e4567-e89b-12d3-a456-426614174000' }
+        },
+        body: ''
+      )
+
+      allow(Rails.logger).to receive(:error)
+      service.send(:process_response, response)
+
+      expect(service.last_delivery_error).to eq('Invalid recipient [number]; apikey=[redacted]')
+    end
   end
 end

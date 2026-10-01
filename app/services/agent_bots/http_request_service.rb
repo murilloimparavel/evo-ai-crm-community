@@ -284,6 +284,16 @@ class AgentBots::HttpRequestService
   end
 
   def extract_context_id
+    inactivity_metadata = @payload[:inactivity_metadata]
+    execution_id = inactivity_metadata&.dig(:execution_id) || inactivity_metadata&.dig('execution_id')
+
+    # Keep synthetic follow-up instructions in a one-off session so they do
+    # not become part of the customer's normal ADK conversation history.
+    if @payload[:event] == 'inactivity_action' && execution_id.present?
+      conversation = find_conversation_from_payload
+      return "#{conversation.id}_inactivity_#{execution_id}" if conversation&.id
+    end
+
     # ALWAYS use conversation UUID (not display_id) for contextId
     # The session_id will be built as {conversation_uuid}_{agent_id} in the AI processor
     # This ensures unique session IDs and avoids conflicts

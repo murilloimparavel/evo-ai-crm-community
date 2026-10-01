@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_10_01_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -621,12 +621,16 @@ ActiveRecord::Schema[7.1].define(version: 2026_08_26_120000) do
     t.jsonb "action_config", default: {}
     t.string "action_type"
     t.text "message_sent"
+    t.string "execution_status", default: "sent", null: false
+    t.integer "attempt_count", default: 0, null: false
+    t.uuid "source_incoming_message_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["agent_bot_id"], name: "index_inactivity_action_executions_on_agent_bot_id"
     t.index ["conversation_id", "action_index"], name: "index_inactivity_executions_on_conv_and_action", unique: true
     t.index ["conversation_id"], name: "index_inactivity_action_executions_on_conversation_id"
     t.index ["executed_at"], name: "index_inactivity_action_executions_on_executed_at"
+    t.index ["execution_status"], name: "index_inactivity_action_executions_on_execution_status"
   end
 
   create_table "inbox_members", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

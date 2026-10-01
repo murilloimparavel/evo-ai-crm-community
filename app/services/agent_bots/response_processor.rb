@@ -49,28 +49,40 @@ class AgentBots::ResponseProcessor
 
     conversation = AgentBots::ConversationFinder.new(@agent_bot, @payload).find_conversation
     return unless conversation
+    return if stale_inactivity_response?(conversation)
+
+    execution_id = inactivity_execution_id
+    if execution_id.present?
+      existing_message = message_for_inactivity_execution(conversation, execution_id)
+      return existing_message if existing_message
+    end
 
     select_part = extracted[:select]
     select_items = select_part&.dig('items')
 
     # Check if text segmentation is enabled for this agent bot
-    if select_items.blank? && @agent_bot.text_segmentation_enabled && ['evo_ai_provider', 'n8n_provider'].include?(@agent_bot.bot_provider)
+    if execution_id.blank? && select_items.blank? && @agent_bot.text_segmentation_enabled && ['evo_ai_provider', 'n8n_provider'].include?(@agent_bot.bot_provider)
       process_segmented_response(text_content, conversation)
     else
       # Process as a single message with signature
       final_content = build_message_with_signature(text_content)
       Rails.logger.info "[AgentBot HTTP] Bot Response Message: #{final_content}"
       
-      # Try to create message normally first
       message_creator = AgentBots::MessageCreator.new(@agent_bot)
       content_type = select_items.present? ? 'input_select' : 'text'
       content_attributes = select_items.present? ? { items: select_items } : nil
+      if execution_id.present?
+        content_attributes = (content_attributes || {}).merge(
+          automation_source: 'inactivity_action',
+          inactivity_execution_id: execution_id
+        )
+      end
       message = message_creator.create_bot_reply(final_content, conversation, content_type: content_type, content_attributes: content_attributes)
-      
-      # If message creation failed (conversation not eligible, e.g., after transfer),
-      # try to force create it anyway (for final responses after transfer)
-      unless message
-        Rails.logger.info "[AgentBot HTTP] Message creation failed (conversation not eligible), attempting force create..."
+
+      # Keep the existing fallback for ordinary agent replies. The inactivity
+      # path remains guarded above and cannot force-send a stale follow-up.
+      unless message || execution_id.present?
+        Rails.logger.info "[AgentBot HTTP] Message creation failed (conversation not eligible, e.g., after transfer), attempting force create..."
         message = message_creator.create_bot_reply(final_content, conversation, force: true, content_type: content_type, content_attributes: content_attributes)
       end
       
@@ -106,6 +118,45 @@ class AgentBots::ResponseProcessor
     end
 
     { text: text, select: select }
+  end
+
+  # Inactivity requests can take long enough for a customer or human agent to
+  # reply while the model is generating. Revalidate at the final message-write
+  # boundary so an obsolete nudge cannot be delivered.
+  def stale_inactivity_response?(conversation)
+    metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']
+    return false unless metadata.present?
+
+    source_id = metadata[:source_incoming_message_id] || metadata['source_incoming_message_id']
+    latest_incoming = conversation.messages.incoming.order(created_at: :desc).first
+    return true if source_id.blank? || latest_incoming&.id.to_s != source_id.to_s
+    return true if conversation.assignee_id.present?
+
+    human_replied = conversation.messages.outgoing
+                               .where(sender_type: 'User', private: false)
+                               .where('created_at > ?', latest_incoming.created_at)
+                               .exists?
+    return true if human_replied
+
+    agent_bot_inbox = AgentBotInbox.find_by(agent_bot: @agent_bot, inbox: conversation.inbox)
+    block_reason = agent_bot_inbox&.processing_block_reason(conversation)
+    return true if block_reason.present?
+
+    false
+  rescue StandardError => e
+    # On validation errors fail closed: a follow-up is less important than
+    # accidentally messaging after a handoff or a fresh customer reply.
+    Rails.logger.error "[AgentBot HTTP] Could not validate inactivity response: #{e.class}: #{e.message}"
+    true
+  end
+
+  def inactivity_execution_id
+    metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']
+    metadata&.dig(:execution_id) || metadata&.dig('execution_id')
+  end
+
+  def message_for_inactivity_execution(conversation, execution_id)
+    conversation.messages.outgoing.find_by("content_attributes ->> 'inactivity_execution_id' = ?", execution_id)
   end
 
   def process_segmented_response(text_content, conversation)

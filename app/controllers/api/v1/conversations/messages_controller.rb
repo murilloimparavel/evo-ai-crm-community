@@ -4,7 +4,8 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
     create: 'conversations.update',
     update: 'conversations.update',
     destroy: 'conversations.update',
-    retry: 'conversations.update'
+    retry: 'conversations.update',
+    forward: 'conversations.update'
   })
 
   before_action :ensure_api_inbox, only: :update
@@ -41,6 +42,46 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
       details: e.message,
       status: :unprocessable_entity
     )
+  end
+
+  # Re-send selected WhatsApp messages to up to five contacts, with a randomized delay per delivery.
+  def forward
+    message_ids = Array(params[:message_ids]).map(&:to_s).uniq
+    contact_ids = Array(params[:contact_ids]).map(&:to_s).uniq
+
+    return invalid_forward_request('Select between 1 and 10 messages') unless message_ids.length.between?(1, 10)
+    return invalid_forward_request('Select between 1 and 5 contacts') unless contact_ids.length.between?(1, 5)
+    return invalid_forward_request('Forwarding is available only for WhatsApp conversations') unless @conversation.inbox.channel_type == 'Channel::Whatsapp'
+
+    messages = @conversation.messages.where(id: message_ids).index_by { |item| item.id.to_s }
+    return invalid_forward_request('One or more messages cannot be forwarded') unless messages.length == message_ids.length
+    ineligible = messages.values.any? do |item|
+      item.private? || item.activity? || item.template? || item.content_attributes&.dig('deleted') || item.content_attributes&.dig('revoked_by_contact')
+    end
+    return invalid_forward_request('Private, deleted, or system messages cannot be forwarded') if ineligible
+    unavailable_media = messages.values.any? { |item| item.attachments.any? { |attachment| !attachment.file.attached? } }
+    return invalid_forward_request('One or more message attachments are unavailable in the CRM') if unavailable_media
+
+    contacts = Contact.where(id: contact_ids).index_by { |item| item.id.to_s }
+    return invalid_forward_request('One or more contacts are unavailable') unless contacts.length == contact_ids.length
+    return invalid_forward_request('All recipients must have a phone number') if contacts.values.any? { |contact| contact.phone_number.blank? }
+
+    sender = Current.user || @resource
+    return error_response(ApiErrorCodes::FORBIDDEN, 'An authenticated agent is required to forward messages', status: :forbidden) unless sender&.id
+
+    delay = 5.seconds
+    queued = 0
+    message_ids.each do |message_id|
+      contact_ids.each do |contact_id|
+        Messages::ForwardMessageJob.set(wait: delay).perform_later(@conversation.id, message_id, contact_id, @conversation.inbox_id, sender.id)
+        delay += rand(5..12).seconds
+        queued += 1
+      end
+    end
+
+    success_response(data: { queued: queued, contacts: contact_ids.length, messages: message_ids.length }, message: 'Messages queued for forwarding', status: :accepted)
+  rescue StandardError => e
+    error_response(ApiErrorCodes::VALIDATION_ERROR, 'Failed to queue forwarded messages', details: e.message, status: :unprocessable_entity)
   end
 
   def update
@@ -138,6 +179,10 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
 
   def perform_status_update(target_status)
     Messages::StatusUpdateService.new(@message, target_status, permitted_params[:external_error]).perform
+  end
+
+  def invalid_forward_request(message)
+    error_response(ApiErrorCodes::INVALID_PARAMETER, message, status: :unprocessable_entity)
   end
 
   def invalid_transition_response(previous_status, target_status)

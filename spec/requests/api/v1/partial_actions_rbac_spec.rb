@@ -40,7 +40,7 @@ RSpec.describe 'Partially mapped write actions RBAC', type: :request do
     {
       'Api::V1::ConversationsController' =>
         %i[mute unmute update_last_seen unread toggle_typing_status meta search filter attachments],
-      'Api::V1::Conversations::MessagesController' => %i[index create update destroy retry],
+      'Api::V1::Conversations::MessagesController' => %i[index create update destroy retry forward],
       'Api::V1::Conversations::ParticipantsController' => %i[show create update destroy],
       'Api::V1::Conversations::DraftMessagesController' => %i[show update destroy],
       'Api::V1::Conversations::AssignmentsController' => %i[create],

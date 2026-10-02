@@ -40,6 +40,10 @@ class Webhooks::BotRuntimeController < ActionController::API
 
     message = AgentBots::MessageCreator.new(agent_bot).create_bot_reply(
       content, conversation,
+      # Bot Runtime may request this bypass only for the single terminal
+      # handoff postback marked by a successful processor transfer result.
+      # Regular bot replies continue through status and ignored-label checks.
+      force: params[:force] == true,
       content_type: content_type,
       content_attributes: content_attributes,
       media: media

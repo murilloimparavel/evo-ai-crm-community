@@ -15,6 +15,7 @@ RSpec.describe AgentBots::InactivityActionsService do
     end
 
     before do
+      service.instance_variable_set(:@conversation, double(id: 'conversation-id'))
       allow(InactivityActionExecution).to receive(:last_action_index_for).and_return(-1)
     end
 
@@ -44,6 +45,43 @@ RSpec.describe AgentBots::InactivityActionsService do
 
     it 'skips conversations assigned to a human' do
       expect(service.send(:should_process?)).to be(false)
+    end
+  end
+
+  describe '#cycle_started_after_activation?' do
+    let(:activation_time) { Time.zone.parse('2026-10-02 10:00:00') }
+    let(:agent_bot) do
+      double(id: 'bot-id', bot_config: { 'inactivity_actions_active_from' => activation_time.iso8601 })
+    end
+
+    before do
+      service.instance_variable_set(:@agent_bot, agent_bot)
+    end
+
+    it 'skips an inactivity cycle that began before activation' do
+      incoming = double(created_at: activation_time - 1.second)
+
+      expect(service.send(:cycle_started_after_activation?, incoming)).to be(false)
+    end
+
+    it 'allows a new customer message at or after activation' do
+      incoming = double(created_at: activation_time)
+
+      expect(service.send(:cycle_started_after_activation?, incoming)).to be(true)
+    end
+
+    it 'preserves legacy behavior when no activation cutoff is configured' do
+      allow(agent_bot).to receive(:bot_config).and_return({ 'inactivity_actions' => [] })
+      incoming = double(created_at: activation_time - 1.second)
+
+      expect(service.send(:cycle_started_after_activation?, incoming)).to be(true)
+    end
+
+    it 'fails closed when the activation timestamp is invalid' do
+      allow(agent_bot).to receive(:bot_config).and_return({ 'inactivity_actions_active_from' => 'invalid' })
+      incoming = double(created_at: activation_time)
+
+      expect(service.send(:cycle_started_after_activation?, incoming)).to be(false)
     end
   end
 

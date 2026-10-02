@@ -75,4 +75,6 @@ jobs:
             spec/models/concerns/user_attribute_helpers_permission_spec.rb \
             spec/rbac \
             spec/requests/api/v1/*_rbac_spec.rb \
+            spec/controllers/api/v1/conversations/messages_forward_spec.rb \
+            spec/jobs/messages/forward_message_job_spec.rb \
             --format progress

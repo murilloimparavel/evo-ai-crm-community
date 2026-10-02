@@ -124,6 +124,9 @@ Rails.application.routes.draw do
           post :import
         end
         resources :messages, only: [:index, :create, :destroy, :update], controller: 'conversations/messages' do
+          collection do
+            post :forward
+          end
           member do
             post :retry
           end

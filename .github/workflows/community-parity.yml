@@ -67,9 +67,10 @@ jobs:
       # *_rbac_spec files stub check_user_permission directly, so they only pass
       # while that delegation is intact — which is what makes them the parity
       # proof and not just an RBAC suite.
-      - name: Run the RBAC suite with no extension consumer mounted
+      - name: Run CRM service and RBAC specs with no extension consumer mounted
         run: |
           bundle exec rspec \
+            spec/services/agent_bots/inactivity_actions_service_spec.rb \
             spec/lib/evo_extension_points/permission_resolver_spec.rb \
             spec/lib/evo_permission_concern_scope_cache_spec.rb \
             spec/models/concerns/user_attribute_helpers_permission_spec.rb \

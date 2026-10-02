@@ -16,6 +16,7 @@ class AgentBots::InactivityActionsService
     time_inactive_minutes = calculate_inactive_time_minutes
     last_incoming = @conversation.messages.incoming.order(created_at: :desc).first
     return unless last_incoming
+    return unless cycle_started_after_activation?(last_incoming)
 
     Rails.logger.info "[InactivityActions] Time inactive: #{time_inactive_minutes} minutes (since last incoming message at #{last_incoming&.created_at})"
 
@@ -82,6 +83,22 @@ class AgentBots::InactivityActionsService
 
     # Configuration order is irrelevant; cadence is always chronological.
     valid_actions.sort_by { |action| action['minutes'].to_i }
+  end
+
+  # A newly enabled global cadence must not message customers whose current
+  # inactivity cycle began before activation. The listener resets executions
+  # on the next incoming customer message, which then starts an eligible cycle.
+  def cycle_started_after_activation?(last_incoming)
+    activation_value = @agent_bot.bot_config&.dig('inactivity_actions_active_from')
+    return true if activation_value.blank? # Preserve legacy configurations.
+
+    activation_time = Time.zone.parse(activation_value.to_s)
+    return false unless activation_time
+
+    last_incoming.created_at >= activation_time
+  rescue ArgumentError, TypeError => e
+    Rails.logger.error "[InactivityActions] Invalid activation timestamp for bot #{@agent_bot.id}: #{e.class}"
+    false
   end
 
   def calculate_inactive_time_minutes

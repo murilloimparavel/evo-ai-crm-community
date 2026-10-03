@@ -76,11 +76,11 @@ class Contact < ApplicationRecord
   after_initialize :set_default_location
   before_validation :prepare_contact_attributes, :ensure_location_present
   before_save :ensure_location_present
-  # after_create_commit :dispatch_create_event # Disabled - using Wisper events instead
-  after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline, :trigger_contact_created_automation
+  after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline, :trigger_contact_created_automation,
+                      :validate_whatsapp_presence
   # after_update_commit :dispatch_update_event # Disabled - using Wisper events instead
   after_update_commit :publish_contact_updated, :publish_custom_attribute_changes, :publish_label_changes,
-                      :trigger_contact_updated_automation
+                      :trigger_contact_updated_automation, :validate_whatsapp_presence
   before_save :sync_contact_attributes
   before_destroy :ensure_pipeline_items_cleanup, :publish_contact_deleted
   after_destroy_commit :dispatch_destroy_event
@@ -244,6 +244,13 @@ class Contact < ApplicationRecord
 
   def ip_lookup
     ContactIpLookupJob.perform_later(self)
+  end
+
+  def validate_whatsapp_presence
+    return if phone_number.blank?
+    return if persisted? && !saved_change_to_phone_number?
+
+    ContactWhatsappValidationJob.perform_later(self)
   end
 
   def phone_number_format

@@ -59,10 +59,21 @@ class Api::V1::ContactsController < Api::V1::BaseController
       )
     end
 
+    query_str = params[:q].to_s.strip
+    phone_variants = Whatsapp::PhoneNumberNormalizer.search_variants(query_str)
+
+    phone_clause = if phone_variants.present?
+                     # Build OR conditions for each phone variant
+                     variant_conditions = phone_variants.map { |v| "phone_number ILIKE '%#{ActiveRecord::Base.sanitize_sql_like(v)}%'" }.join(' OR ')
+                     "(phone_number ILIKE :search OR #{variant_conditions})"
+                   else
+                     'phone_number ILIKE :search'
+                   end
+
     contacts = listable_contacts.where(
-      'name ILIKE :search OR email ILIKE :search OR phone_number ILIKE :search OR contacts.identifier LIKE :search
-        OR contacts.additional_attributes->>\'company_name\' ILIKE :search',
-      search: "%#{params[:q].strip}%"
+      "name ILIKE :search OR email ILIKE :search OR #{phone_clause} OR contacts.identifier LIKE :search
+        OR contacts.additional_attributes->>'company_name' ILIKE :search",
+      search: "%#{query_str}%"
     )
     @contacts_count = contacts.count
     @contacts = fetch_contacts(contacts)

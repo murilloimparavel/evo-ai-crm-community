@@ -57,6 +57,7 @@ class Contact < ApplicationRecord
   validates :phone_number,
             allow_blank: true, uniqueness: true,
             format: { with: /\+[1-9]\d{1,14}\z/, message: I18n.t('errors.contacts.phone_number.invalid') }
+  validate :validate_phone_number_uniqueness_across_variants
   validates :tax_id, allow_blank: true, uniqueness: true, length: { maximum: 14 }
   validates :website, allow_blank: true, format: { with: URI::DEFAULT_PARSER.make_regexp(%w[http https]), message: 'must be a valid URL' }
   has_many :conversations, dependent: :destroy_async
@@ -249,6 +250,24 @@ class Contact < ApplicationRecord
     return if phone_number.blank?
 
     self.phone_number = phone_number_was unless phone_number.match?(/\+[1-9]\d{1,14}\z/)
+  end
+
+  def validate_phone_number_uniqueness_across_variants
+    return if phone_number.blank?
+    return unless phone_number_changed?
+
+    variants = Whatsapp::PhoneNumberNormalizer.search_variants(phone_number)
+    # Convert variants to E.164 formats for exact match against stored phone_numbers
+    e164_variants = variants.map { |v| v.start_with?('+') ? v : "+#{v}" }.uniq
+
+    scope = Contact.where(phone_number: e164_variants)
+    scope = scope.where.not(id: id) if persisted?
+    existing = scope.first
+
+    return unless existing
+
+    contact_desc = existing.name.presence || existing.phone_number
+    errors.add(:phone_number, "já está cadastrado para o contato #{contact_desc} (#{existing.phone_number})")
   end
 
   def email_format

@@ -671,6 +671,19 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     text
   end
 
+  def error_message(response)
+    parsed = response.respond_to?(:parsed_response) ? response.parsed_response : nil
+    if parsed.is_a?(Hash)
+      # Evolution API 400 shape: { status: 400, error: "Bad Request", response: { message: [{ jid: "...", exists: false, number: "..." }] } }
+      msgs = parsed.dig('response', 'message')
+      if msgs.is_a?(Array) && msgs.any? { |m| m.is_a?(Hash) && m['exists'] == false }
+        return 'Este número de telefone não possui uma conta de WhatsApp ativa.'
+      end
+    end
+
+    super
+  end
+
   def process_response(response)
     if response.success?
       parsed_response = response.parsed_response

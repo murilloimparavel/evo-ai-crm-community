@@ -116,11 +116,11 @@ module Whatsapp::EvolutionHandlers::MessagesUpsert
     push_name = contact_name
     raw_source_id = phone_number_from_jid
 
-    # Always normalize Brazilian numbers to the 9-digit format.
-    # processed_waid only helps when a contact_inbox already exists; it misses contacts
-    # created manually in the CRM (Contact record exists, but no ContactInbox yet).
-    # By normalizing unconditionally, find_contact_by_phone_number can also match them.
-    source_id = brazil_phone_number?(raw_source_id) ? normalised_brazil_mobile_number(raw_source_id) : raw_source_id
+    # Always normalize Brazilian numbers using the canonical PhoneNumberNormalizer
+    # (consistent with Contact#prepare_phone_number_attribute and Evolution createJid).
+    # If raw_source_id cannot be normalized, fall back to raw_source_id.
+    normalized_digits = Whatsapp::PhoneNumberNormalizer.call(raw_source_id)
+    source_id = normalized_digits.presence || raw_source_id
 
     contact_inbox = ::ContactInboxWithContactBuilder.new(
       source_id: source_id,

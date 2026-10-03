@@ -175,11 +175,15 @@ class ContactInboxWithContactBuilder
   def find_contact_by_phone_number(phone_number)
     return if phone_number.blank?
 
-    # Normalize the lookup key to the canonical stored form so a contact created
-    # via another path (e.g. leads API) is matched instead of duplicated.
-    normalized = Whatsapp::PhoneNumberNormalizer.to_e164(phone_number)
-    return if normalized.blank?
+    variants = Whatsapp::PhoneNumberNormalizer.search_variants(phone_number)
+    e164_variants = variants.map { |v| v.start_with?('+') ? v : "+#{v}" }.uniq
 
-    Contact.find_by(phone_number: normalized)
+    # First try by canonical E.164
+    normalized = Whatsapp::PhoneNumberNormalizer.to_e164(phone_number)
+    contact = Contact.find_by(phone_number: normalized) if normalized.present?
+    return contact if contact
+
+    # If not found, try all variants (handles contacts saved under legacy 13 or 12 digits)
+    Contact.where(phone_number: e164_variants).first
   end
 end

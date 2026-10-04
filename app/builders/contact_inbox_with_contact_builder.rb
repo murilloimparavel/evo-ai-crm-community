@@ -14,9 +14,16 @@ class ContactInboxWithContactBuilder
   end
 
   def find_or_create_contact_and_contact_inbox
-    # For non-Evolution Go channels, use the simple source_id lookup
+    # For non-Evolution Go channels, use the source_id lookup (with BR phone variants fallback)
     unless evolution_go_channel?
-      @contact_inbox = inbox.contact_inboxes.find_by(source_id: source_id) if source_id.present?
+      if source_id.present?
+        @contact_inbox = inbox.contact_inboxes.find_by(source_id: source_id)
+        if @contact_inbox.nil? && inbox.channel_type == 'Channel::Whatsapp'
+          variants = Whatsapp::PhoneNumberNormalizer.search_variants(source_id)
+          clean_variants = variants.map { |v| v.delete('+') }.uniq
+          @contact_inbox = inbox.contact_inboxes.where(source_id: clean_variants).first
+        end
+      end
       # BSUID fallback: if source_id lookup failed and source_id looks like a BSUID,
       # try finding by bsuid column (contact was previously created with phone as source_id)
       if @contact_inbox.nil? && whatsapp_cloud_channel? && source_id.present? && source_id.match?(RegexHelper::BSUID_REGEX)

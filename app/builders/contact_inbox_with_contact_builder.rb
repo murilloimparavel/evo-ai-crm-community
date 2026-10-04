@@ -14,9 +14,16 @@ class ContactInboxWithContactBuilder
   end
 
   def find_or_create_contact_and_contact_inbox
-    # For non-Evolution Go channels, use the simple source_id lookup
+    # For non-Evolution Go channels, use the source_id lookup (with BR phone variants fallback)
     unless evolution_go_channel?
-      @contact_inbox = inbox.contact_inboxes.find_by(source_id: source_id) if source_id.present?
+      if source_id.present?
+        @contact_inbox = inbox.contact_inboxes.find_by(source_id: source_id)
+        if @contact_inbox.nil? && inbox.channel_type == 'Channel::Whatsapp'
+          variants = Whatsapp::PhoneNumberNormalizer.search_variants(source_id)
+          clean_variants = variants.map { |v| v.delete('+') }.uniq
+          @contact_inbox = inbox.contact_inboxes.where(source_id: clean_variants).first
+        end
+      end
       # BSUID fallback: if source_id lookup failed and source_id looks like a BSUID,
       # try finding by bsuid column (contact was previously created with phone as source_id)
       if @contact_inbox.nil? && whatsapp_cloud_channel? && source_id.present? && source_id.match?(RegexHelper::BSUID_REGEX)
@@ -175,11 +182,15 @@ class ContactInboxWithContactBuilder
   def find_contact_by_phone_number(phone_number)
     return if phone_number.blank?
 
-    # Normalize the lookup key to the canonical stored form so a contact created
-    # via another path (e.g. leads API) is matched instead of duplicated.
-    normalized = Whatsapp::PhoneNumberNormalizer.to_e164(phone_number)
-    return if normalized.blank?
+    variants = Whatsapp::PhoneNumberNormalizer.search_variants(phone_number)
+    e164_variants = variants.map { |v| v.start_with?('+') ? v : "+#{v}" }.uniq
 
-    Contact.find_by(phone_number: normalized)
+    # First try by canonical E.164
+    normalized = Whatsapp::PhoneNumberNormalizer.to_e164(phone_number)
+    contact = Contact.find_by(phone_number: normalized) if normalized.present?
+    return contact if contact
+
+    # If not found, try all variants (handles contacts saved under legacy 13 or 12 digits)
+    Contact.where(phone_number: e164_variants).first
   end
 end

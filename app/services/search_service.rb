@@ -24,11 +24,20 @@ class SearchService
     @search_query ||= params[:q].to_s.strip
   end
 
+  def phone_search_clause(column_name)
+    variants = Whatsapp::PhoneNumberNormalizer.search_variants(search_query)
+    return "#{column_name} ILIKE :search" if variants.blank?
+
+    conditions = variants.map { |v| "#{column_name} ILIKE '%#{ActiveRecord::Base.sanitize_sql_like(v)}%'" }.join(' OR ')
+    "(#{column_name} ILIKE :search OR #{conditions})"
+  end
+
   def filter_conversations
+    phone_clause = phone_search_clause('contacts.phone_number')
     @conversations = Conversation.where(inbox_id: accessable_inbox_ids)
                                     .joins('INNER JOIN contacts ON conversations.contact_id = contacts.id')
                                     .where("cast(conversations.display_id as text) ILIKE :search OR contacts.name ILIKE :search OR contacts.email
-                            ILIKE :search OR contacts.phone_number ILIKE :search OR contacts.identifier ILIKE :search", search: "%#{search_query}%")
+                            ILIKE :search OR #{phone_clause} OR contacts.identifier ILIKE :search", search: "%#{search_query}%")
                                     .order('conversations.created_at DESC')
                                     .page(params[:page])
                                     .per(15)
@@ -85,11 +94,11 @@ class SearchService
   end
 
   def filter_contacts
+    phone_clause = phone_search_clause('phone_number')
     base = params[:include_groups] == 'true' ? Contact.all : Contact.non_groups
     @contacts = base.where(
-      "name ILIKE :search OR email ILIKE :search OR phone_number
-      ILIKE :search OR identifier ILIKE :search", search: "%#{search_query}%"
+      "name ILIKE :search OR email ILIKE :search OR #{phone_clause} OR identifier ILIKE :search",
+      search: "%#{search_query}%"
     ).resolved_contacts.order_on_last_activity_at('desc').page(params[:page]).per(15)
   end
-
 end

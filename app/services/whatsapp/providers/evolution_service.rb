@@ -245,6 +245,40 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     try_delete_instance(instance_name)
   end
 
+  # Checks if a phone number exists on WhatsApp via Evolution API.
+  # Returns a Hash like { exists: true/false, jid: "...", name: "..." } or nil on API failure.
+  def check_whatsapp_number(phone_number)
+    number = phone_number.to_s.delete('+')
+    return nil if number.blank? || api_base_path.blank? || instance_name.blank?
+
+    response = HTTParty.post(
+      "#{api_base_path}/chat/whatsappNumbers/#{instance_name}",
+      headers: api_headers,
+      body: { numbers: [number] }.to_json,
+      open_timeout: 5,
+      read_timeout: 10
+    )
+
+    unless response.success?
+      Rails.logger.warn "Evolution API: check_whatsapp_number HTTP #{response.code}"
+      return nil
+    end
+
+    parsed = response.parsed_response
+    entry = parsed.is_a?(Array) ? parsed.first : parsed
+    return nil unless entry.is_a?(Hash)
+
+    {
+      exists: entry['exists'] == true,
+      jid: entry['jid'],
+      name: entry['name'],
+      number: entry['number']
+    }
+  rescue StandardError => e
+    Rails.logger.error "Evolution API: check_whatsapp_number error: #{e.class} - #{e.message}"
+    nil
+  end
+
   # Fetch a contact's WhatsApp profile picture URL via Evolution API.
   # Returns the URL string when present, or nil on any failure / missing picture.
   # The endpoint is best-effort — Evolution responses vary across versions, so we
@@ -669,6 +703,19 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
       end
     end
     text
+  end
+
+  def error_message(response)
+    parsed = response.respond_to?(:parsed_response) ? response.parsed_response : nil
+    if parsed.is_a?(Hash)
+      # Evolution API 400 shape: { status: 400, error: "Bad Request", response: { message: [{ jid: "...", exists: false, number: "..." }] } }
+      msgs = parsed.dig('response', 'message')
+      if msgs.is_a?(Array) && msgs.any? { |m| m.is_a?(Hash) && m['exists'] == false }
+        return 'Este número de telefone não possui uma conta de WhatsApp ativa.'
+      end
+    end
+
+    super
   end
 
   def process_response(response)

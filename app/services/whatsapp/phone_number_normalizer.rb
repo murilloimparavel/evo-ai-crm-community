@@ -35,6 +35,52 @@ class Whatsapp::PhoneNumberNormalizer
     "+#{digits}"
   end
 
+  # Returns an array of search query substrings for flexible matching of Brazilian
+  # phone numbers. For example, given "61993578880", "5561993578880", "6193578880"
+  # or "+55 (61) 99357-8880", returns:
+  #   ["556193578880", "5561993578880", "6193578880", "61993578880"]
+  # If the input is not a Brazilian mobile number shape, returns [clean_digits].
+  def self.search_variants(raw)
+    digits = raw.to_s.gsub(/\D/, '')
+    return [] if digits.empty?
+
+    variants = [digits]
+
+    # Normalize to DDD + subscriber if national (10 or 11 digits) or international (12 or 13 digits)
+    if digits.start_with?('55') && digits.length.between?(12, 13)
+      ddd = digits[2, 2]
+      subscriber = digits[4..]
+      prefix = '55'
+    elsif !digits.start_with?('55') && digits.length.between?(10, 11)
+      ddd = digits[0, 2]
+      subscriber = digits[2..]
+      prefix = ''
+    else
+      return variants
+    end
+
+    # Build both 8-digit and 9-digit versions of the subscriber
+    if subscriber.length == 9 && subscriber.start_with?('9')
+      sub_with_9 = subscriber
+      sub_without_9 = subscriber[1..]
+    elsif subscriber.length == 8
+      sub_without_9 = subscriber
+      sub_with_9 = "9#{subscriber}"
+    else
+      return variants
+    end
+
+    # Add all useful permutations (with 55, without 55, with +, without +)
+    variants << "55#{ddd}#{sub_with_9}"
+    variants << "55#{ddd}#{sub_without_9}"
+    variants << "+55#{ddd}#{sub_with_9}"
+    variants << "+55#{ddd}#{sub_without_9}"
+    variants << "#{ddd}#{sub_with_9}"
+    variants << "#{ddd}#{sub_without_9}"
+
+    variants.uniq
+  end
+
   def initialize(raw)
     @raw = raw.to_s
   end

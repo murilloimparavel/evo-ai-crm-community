@@ -108,4 +108,57 @@ RSpec.describe Whatsapp::PhoneNumberNormalizer do
       end
     end
   end
+
+  describe '.search_variants' do
+    subject(:variants) { described_class.search_variants(input) }
+
+    context 'with blank input' do
+      let(:input) { '' }
+
+      it { is_expected.to eq([]) }
+    end
+
+    context 'with Brazilian 13 digits (with 9)' do
+      let(:input) { '5561993578880' }
+
+      it 'returns both 12 and 13 digit variations' do
+        expect(variants).to include('556193578880')
+        expect(variants).to include('5561993578880')
+        expect(variants).to include('+556193578880')
+        expect(variants).to include('+5561993578880')
+        expect(variants).to include('6193578880')
+        expect(variants).to include('61993578880')
+      end
+    end
+
+    context 'with Brazilian 12 digits (without 9)' do
+      let(:input) { '556193578880' }
+
+      it 'returns both 12 and 13 digit variations' do
+        expect(variants).to include('556193578880')
+        expect(variants).to include('5561993578880')
+        expect(variants).to include('6193578880')
+        expect(variants).to include('61993578880')
+      end
+    end
+
+    context 'with local DDD + number (e.g. 61993578880)' do
+      let(:input) { '61993578880' }
+
+      it 'generates variations with and without country code' do
+        expect(variants).to include('556193578880')
+        expect(variants).to include('5561993578880')
+        expect(variants).to include('6193578880')
+        expect(variants).to include('61993578880')
+      end
+    end
+
+    context 'with non-Brazilian number' do
+      let(:input) { '+1 415 555 2671' }
+
+      it 'returns cleaned digits only' do
+        expect(variants).to eq(['14155552671'])
+      end
+    end
+  end
 end

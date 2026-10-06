@@ -134,11 +134,22 @@ module EvolutionHub
       ig = payload['instagram_connection'] || {}
       token = meta['access_token'].presence || ig['access_token'].presence
       channel.access_token = token if token
-      if channel.instagram_id.blank?
-        channel.instagram_id = meta['instagram_user_id'].presence || ig['instagram_user_id'].presence || ig['instagram_id'].presence
+      # Channels created by InboxBuilder start with a non-blank pending_* ID.
+      # Treat that placeholder as missing so the lifecycle payload (or Hub
+      # lookup fallback) can install the real Meta account ID used by inbound
+      # webhook routing.
+      if channel.instagram_id.blank? || pending_instagram_id?(channel.instagram_id)
+        channel.instagram_id = meta['instagram_user_id'].presence ||
+                               ig['instagram_user_id'].presence ||
+                               ig['instagram_id'].presence
       end
-      # Fallback (Hub antigo, sem a chave no payload): busca o id real via GET /channels/:id.
-      channel.instagram_id = real_instagram_id_from_hub(channel) if channel.instagram_id.blank?
+      # Fallback (older Hub payloads without the ID): fetch it from the Hub.
+      if channel.instagram_id.blank? || pending_instagram_id?(channel.instagram_id)
+        channel.instagram_id = real_instagram_id_from_hub(channel)
+      end
+      if pending_instagram_id?(channel.instagram_id)
+        Rails.logger.warn("EvolutionHub::ChannelConnected: Instagram account ID unresolved for channel #{channel.id}")
+      end
       ensure_instagram_presence(channel)
       channel.evolution_hub_meta = active_hub_meta(channel)
       channel.save!
@@ -164,6 +175,10 @@ module EvolutionHub
     def ensure_instagram_presence(channel)
       channel.access_token = "hub-managed-#{SecureRandom.hex(8)}" if channel.read_attribute(:access_token).blank?
       channel.instagram_id = "pending_#{SecureRandom.hex(6)}" if channel.instagram_id.blank?
+    end
+
+    def pending_instagram_id?(value)
+      value.to_s.start_with?('pending_')
     end
 
     # Busca o instagram_user_id REAL no Hub (GET /channels/:id → instagram_connection) quando o

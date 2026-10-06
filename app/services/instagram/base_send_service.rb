@@ -53,14 +53,14 @@ class Instagram::BaseSendService < Base::SendOnChannelService
     merge_human_agent_tag(params)
   end
 
-  def process_response(response, message_content)
+  def process_response(response, _message_content)
     parsed_response = response.parsed_response
     if response.success? && parsed_response['error'].blank?
       message.update!(source_id: parsed_response['message_id'])
       parsed_response
     else
       external_error = external_error(parsed_response)
-      Rails.logger.error("Instagram response: #{external_error} : #{message_content}")
+      Rails.logger.error("Instagram response: #{external_error}")
       Messages::StatusUpdateService.new(message, 'failed', external_error).perform
       nil
     end

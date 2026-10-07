@@ -175,7 +175,8 @@ module Whatsapp
       raise UnsafeMigration, 'source and target inboxes must be different' if source.id == target.id
       raise UnsafeMigration, 'source inbox must use the Evolution provider' unless source.channel_type == 'Channel::Whatsapp' && source.channel.provider == 'evolution'
       raise UnsafeMigration, 'target inbox must use the WhatsApp Cloud provider' unless target.channel_type == 'Channel::Whatsapp' && target.channel.provider == 'whatsapp_cloud'
-      raise UnsafeMigration, 'target WhatsApp channel must be Hub-managed' unless target.channel.hub_managed?
+      hub_config = target.channel.provider_config.to_h['evolution_hub']
+      raise UnsafeMigration, 'target WhatsApp channel must be Hub-managed' unless hub_config.is_a?(Hash)
     end
 
     def ensure_source_disconnected!(source)

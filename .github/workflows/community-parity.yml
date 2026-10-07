@@ -72,6 +72,7 @@ jobs:
           bundle exec rspec \
             spec/services/agent_bots/inactivity_actions_service_spec.rb \
             spec/services/instagram/send_on_instagram_service_spec.rb \
+            spec/services/whatsapp/evolution_inbox_migration_spec.rb \
             spec/lib/evo_extension_points/permission_resolver_spec.rb \
             spec/lib/evo_permission_concern_scope_cache_spec.rb \
             spec/models/concerns/user_attribute_helpers_permission_spec.rb \

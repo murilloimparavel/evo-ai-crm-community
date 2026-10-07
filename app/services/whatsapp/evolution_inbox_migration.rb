@@ -39,7 +39,7 @@ module Whatsapp
       conversations_without_source_link = conversations.where(contact_inbox_id: nil)
                                                         .or(conversations.where.not(contact_inbox_id: source_contact_inbox_ids)).count
       cross_inbox_reply_references = Message.where(inbox_id: source.id)
-                                            .where("content_attributes ? 'in_reply_to_external_id'").count
+                                            .where("content_attributes::jsonb ? 'in_reply_to_external_id'").count
       reporting_events_without_conversation = ReportingEvent.where(inbox_id: source.id, conversation_id: nil).count
 
       {
@@ -250,7 +250,7 @@ module Whatsapp
     end
 
     def inbox_settings(inbox)
-      %w[name greeting_enabled greeting_message out_of_office_message working_hours_enabled timezone
+      %w[greeting_enabled greeting_message out_of_office_message working_hours_enabled timezone
          enable_auto_assignment auto_assignment_config allow_messages_after_resolved lock_to_single_conversation
          default_conversation_status csat_survey_enabled csat_config].index_with do |attribute|
         inbox.public_send(attribute)

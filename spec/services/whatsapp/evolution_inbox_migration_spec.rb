@@ -15,7 +15,10 @@ RSpec.describe Whatsapp::EvolutionInboxMigration do
     Channel::Whatsapp.create!(
       provider: 'whatsapp_cloud',
       phone_number: '+5511999990002',
-      provider_config: { 'api_key' => 'test-token', 'waba_id' => 'test-waba' }
+      provider_config: {
+        'evolution_hub' => { 'channel_id' => 'hub-target', 'linked' => true },
+        'waba_id' => 'test-waba'
+      }
     )
   end
   let(:source_inbox) { Inbox.create!(name: 'WhatsApp Evolution', channel: source_channel) }

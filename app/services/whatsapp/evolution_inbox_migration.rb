@@ -23,7 +23,8 @@ module Whatsapp
     def preview
       source, target = load_inboxes!
       conversations = source.conversations
-      source_contact_inboxes = ContactInbox.where(id: conversations.select(:contact_inbox_id))
+      source_contact_inboxes = ContactInbox.where(inbox_id: source.id,
+                                                  id: conversations.select(:contact_inbox_id))
                                            .includes(:contact).to_a.uniq(&:contact_id)
       items = source_contact_inboxes.map do |contact_inbox|
         destination_for(contact_inbox)
@@ -34,8 +35,12 @@ module Whatsapp
       target_contact_inbox_ids = items.filter_map { |item| item.dig(:contact_inbox, :id) }.uniq
       active_target_overlaps = Conversation.where(contact_inbox_id: target_contact_inbox_ids,
                                                    status: %i[open pending snoozed]).count
+      source_contact_inbox_ids = ContactInbox.where(inbox_id: source.id).select(:id)
+      conversations_without_source_link = conversations.where(contact_inbox_id: nil)
+                                                        .or(conversations.where.not(contact_inbox_id: source_contact_inbox_ids)).count
       cross_inbox_reply_references = Message.where(inbox_id: source.id)
                                             .where("content_attributes ? 'in_reply_to_external_id'").count
+      reporting_events_without_conversation = ReportingEvent.where(inbox_id: source.id, conversation_id: nil).count
 
       {
         source_inbox: { id: source.id, name: source.name, provider: source.channel.provider,
@@ -47,13 +52,14 @@ module Whatsapp
         active_conversations: conversations.where(status: %i[open pending snoozed]).count,
         pipeline_items: PipelineItem.joins(:conversation).where(conversations: { inbox_id: source.id }).count,
         reporting_events: ReportingEvent.where(inbox_id: source.id).count,
+        reporting_events_without_conversation: reporting_events_without_conversation,
         contact_inboxes_used: conversations.select(:contact_inbox_id).distinct.count,
         target_contact_inboxes_reused: items.count { |item| item[:kind] == :existing },
         target_contact_inboxes_to_create: items.count { |item| item[:kind] == :create },
         unaddressable_contacts: blocked_reasons[:unsupported_cloud_recipient],
         identity_conflicts: blocked_reasons[:target_identity_conflict] + blocked_reasons[:invalid_target_recipient],
         ambiguous_contact_mappings: blocked_reasons[:ambiguous_source_contact] + blocked_reasons[:ambiguous_target_contact],
-        missing_contact_links: blocked_reasons[:missing_contact_inbox],
+        missing_contact_links: blocked_reasons[:missing_contact_inbox] + conversations_without_source_link,
         blocked_reasons: blocked_reasons,
         active_target_overlaps: active_target_overlaps,
         cross_provider_reply_references: cross_inbox_reply_references,
@@ -75,6 +81,7 @@ module Whatsapp
       initial = preview
       raise UnsafeMigration, 'source inbox is connected; disconnect it before migration' unless DISCONNECTED_STATES.include?(initial.dig(:source_inbox, :connection).to_s)
       raise UnsafeMigration, "migration preflight has blockers: #{initial[:blocked_reasons].inspect}" if initial[:blocked_reasons].any?
+      raise UnsafeMigration, 'one or more conversations have no source contact link' if initial[:missing_contact_links].positive?
       raise UnsafeMigration, 'active target conversations overlap migrated contacts; resolve them before migration' if initial[:active_target_overlaps].positive?
       raise UnsafeMigration, 'source inbox has hooks or webhooks; disable them before migration' if initial[:source_webhooks].positive? || initial[:source_integrations].positive?
 
@@ -101,6 +108,14 @@ module Whatsapp
         source, target = load_inboxes!
         ensure_source_disconnected!(source)
         ensure_target_still_clear!(target)
+        raise UnsafeMigration, 'source conversations appeared during migration; rerun preview' if source.conversations.exists?
+        raise UnsafeMigration, 'source messages remain outside migrated conversations' if source.messages.exists?
+        raise UnsafeMigration, 'source hooks or webhooks appeared during migration' unless source.webhooks.none? && source.hooks.none?
+        source.contact_inboxes.find_each do |contact_inbox|
+          raise UnsafeMigration, 'source contact inbox still has conversations' if contact_inbox.conversations.exists?
+
+          contact_inbox.destroy!
+        end
         # Reporting rows that are scoped to an inbox but not to a conversation
         # remain useful after the historical inbox is retired.
         ReportingEvent.where(inbox_id: @source_inbox_id).update_all(inbox_id: @target_inbox_id)
@@ -140,6 +155,7 @@ module Whatsapp
 
         channel = source.channel
         channel.define_singleton_method(:disconnect_channel_provider) { true }
+        channel.define_singleton_method(:evolution_hub_cleanup) { true }
         channel.destroy!
       end
 
@@ -159,6 +175,7 @@ module Whatsapp
       raise UnsafeMigration, 'source and target inboxes must be different' if source.id == target.id
       raise UnsafeMigration, 'source inbox must use the Evolution provider' unless source.channel_type == 'Channel::Whatsapp' && source.channel.provider == 'evolution'
       raise UnsafeMigration, 'target inbox must use the WhatsApp Cloud provider' unless target.channel_type == 'Channel::Whatsapp' && target.channel.provider == 'whatsapp_cloud'
+      raise UnsafeMigration, 'target WhatsApp channel must be Hub-managed' unless target.channel.hub_managed?
     end
 
     def ensure_source_disconnected!(source)

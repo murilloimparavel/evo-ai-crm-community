@@ -146,10 +146,7 @@ module Whatsapp
           reporting_events: ReportingEvent.where(inbox_id: source.id).count,
           webhooks: source.webhooks.count,
           integrations: source.hooks.count,
-          contact_inboxes: source.contact_inboxes.count,
-          inbox_members: source.inbox_members.count,
-          agent_bot: source.agent_bot_inbox.present? ? 1 : 0,
-          working_hours: source.working_hours.count
+          contact_inboxes: source.contact_inboxes.count
         }
         raise UnsafeMigration, "source inbox still has dependent data: #{blockers.inspect}" if blockers.values.any?(&:positive?)
 

@@ -109,7 +109,7 @@ RSpec.describe Whatsapp::EvolutionInboxMigration do
 
       expect do
         migration.migrate!(confirm_source_inbox_id: source_inbox.id, confirm_target_inbox_id: target_inbox.id)
-      end.to raise_error(described_class::UnsafeMigration, /must be disconnected/)
+      end.to raise_error(described_class::UnsafeMigration, /source inbox is connected/)
     end
   end
 
@@ -129,7 +129,11 @@ RSpec.describe Whatsapp::EvolutionInboxMigration do
     end
 
     it 'retires only an empty inbox without calling the Evolution provider' do
+      attachment.destroy!
+      message.destroy!
+      reporting_event.destroy!
       conversation.destroy!
+      source_contact_inbox.destroy!
 
       expect_any_instance_of(Whatsapp::Providers::EvolutionService).not_to receive(:disconnect_channel_provider)
       migration.retire_source_inbox!(confirmation: source_inbox.id)

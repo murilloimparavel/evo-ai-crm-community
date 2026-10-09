@@ -18,20 +18,103 @@ module Whatsapp::IncomingMessageServiceHelpers
   def message_type
     if evolution_api?
       # Evolution API structure: data.messageType
-      @processed_params[:data][:messageType]
+      payload_value(@processed_params, :data, :messageType)
     else
       # Baileys structure: messages.first.type
-      @processed_params[:messages].first[:type]
+      payload_value(@processed_params, :messages)&.first&.then { |message| payload_value(message, :type) }
     end
   end
 
   def message_content(message)
-    # TODO: map interactive messages back to button messages in Evolution
-    message.dig(:text, :body) ||
-      message.dig(:button, :text) ||
-      message.dig(:interactive, :button_reply, :title) ||
-      message.dig(:interactive, :list_reply, :title) ||
-      message.dig(:name, :formatted_name)
+    content = payload_value(message, :text, :body) ||
+              payload_value(message, :button, :text) ||
+              payload_value(message, :interactive, :button_reply, :title) ||
+              payload_value(message, :interactive, :list_reply, :title) ||
+              payload_value(message, :interactive, :nfm_reply, :body) ||
+              payload_value(message, :interactive, :list_reply, :description) ||
+              payload_value(message, :interactive, :button_reply, :description) ||
+              payload_value(message, :name, :formatted_name)
+
+    return content if content.present?
+
+    message_type = payload_value(message, :type)
+    case message_type
+    when 'image' then 'Imagem recebida'
+    when 'audio' then 'Áudio recebido'
+    when 'video' then 'Vídeo recebido'
+    when 'contacts' then contacts_message_content(payload_value(message, :contacts))
+    when 'document' then payload_value(message, :document, :filename).presence || 'Documento recebido'
+    when 'sticker' then 'Figurinha recebida'
+    when 'location' then location_message_content(payload_value(message, :location))
+    when 'reaction' then reaction_message_content(payload_value(message, :reaction))
+    when 'order' then order_message_content(payload_value(message, :order))
+    when 'system' then system_message_content(payload_value(message, :system))
+    when 'unknown' then unknown_message_content(payload_value(message, :errors))
+    else
+      message_type.present? ? "Mensagem do WhatsApp (#{message_type})" : 'Mensagem do WhatsApp recebida'
+    end
+  end
+
+  def location_message_content(location)
+    return 'Localização recebida' if location.blank?
+
+    name = [payload_value(location, :name), payload_value(location, :address)].select(&:present?).join(', ')
+    name.presence || 'Localização recebida'
+  end
+
+  def contacts_message_content(contacts)
+    names = Array(contacts).each_with_object([]) do |contact, collected_names|
+      name = payload_value(contact, :name, :formatted_name).presence
+      collected_names << name if name
+    end
+    names.any? ? "Contato recebido: #{names.first(3).join(', ')}" : 'Contato recebido'
+  end
+
+  def payload_value(payload, *keys)
+    keys.reduce(payload) do |value, key|
+      break nil if value.nil?
+
+      value[key] || value[key.to_s]
+    end
+  rescue TypeError, NoMethodError
+    nil
+  end
+
+  def reaction_message_content(reaction)
+    emoji = payload_value(reaction, :emoji).presence
+    emoji ? "Reagiu com #{emoji}" : 'Reação recebida'
+  end
+
+  def order_message_content(order)
+    products = Array(payload_value(order, :product_items))
+    return 'Pedido do catálogo recebido' if products.empty?
+
+    product_names = products.first(3).each_with_object([]) do |product, names|
+      product_id = payload_value(product, :product_retailer_id).presence
+      quantity = payload_value(product, :quantity).presence
+      next unless product_id
+
+      names << (quantity ? "#{product_id} (#{quantity})" : product_id)
+    end
+    summary = product_names.any? ? ": #{product_names.join(', ')}" : ''
+    remaining = products.size - product_names.size
+    summary += " e mais #{remaining}" if remaining.positive?
+    "Pedido do catálogo recebido (#{products.size} #{products.size == 1 ? 'item' : 'itens'})#{summary}"
+  end
+
+  def system_message_content(system)
+    return 'Atualização do WhatsApp recebida' if system.blank?
+
+    case payload_value(system, :type)
+    when 'customer_changed_number' then 'O contato informou uma alteração no número do WhatsApp'
+    else 'Atualização do WhatsApp recebida'
+    end
+  end
+
+  def unknown_message_content(errors)
+    error = Array(errors).first || {}
+    code = payload_value(error, :code).presence
+    code ? "Mensagem do WhatsApp não suportada (código #{code})" : 'Mensagem do WhatsApp não suportada'
   end
 
   def file_content_type(file_type)
@@ -45,7 +128,7 @@ module Whatsapp::IncomingMessageServiceHelpers
   end
 
   def unprocessable_message_type?(message_type)
-    %w[reaction ephemeral unsupported request_welcome].include?(message_type)
+    %w[ephemeral unsupported request_welcome].include?(message_type)
   end
 
   def brazil_phone_number?(phone_number)
@@ -87,15 +170,21 @@ module Whatsapp::IncomingMessageServiceHelpers
   end
 
   def error_webhook_event?(message)
-    message.key?('errors')
+    payload_value(message, :errors).present?
   end
 
   def log_error(message)
-    Rails.logger.warn "Whatsapp Error: #{message['errors'][0]['title']} - contact: #{message['from']}"
+    errors = payload_value(message, :errors)
+    error = Array(errors).first || {}
+    type = payload_value(message, :type)
+    code = payload_value(error, :code)
+    # Provider titles and contact identifiers can contain user data. Keep the
+    # diagnostic useful without logging message text, phone numbers, or tokens.
+    Rails.logger.warn("WhatsApp webhook reported an error (type=#{type}, code=#{code || 'unknown'})")
   end
 
   def process_in_reply_to(message)
-    @in_reply_to_external_id = message['context']&.[]('id')
+    @in_reply_to_external_id = payload_value(message, :context, :id)
   end
 
   def find_message_by_source_id(source_id)

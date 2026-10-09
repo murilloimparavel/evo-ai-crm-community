@@ -274,7 +274,9 @@ RSpec.describe AutomationRules::ConditionsFilterService do
       expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(true)
       expect(service.filter_values(rule.conditions.first)).to eq(['true'])
       matched = service.perform
-      expect(matched).to be(true), "query=#{service.instance_variable_get(:@query_string)} values=#{service.instance_variable_get(:@filter_values).inspect} relation=#{service.send(:base_relation).to_sql}"
+      raw_message = Message.sanitize_sql_array(['SELECT content_attributes::text FROM messages WHERE id = ?', echo.id])
+      raw_marker = Message.sanitize_sql_array(["SELECT content_attributes::jsonb ->> 'whatsapp_echo_message' FROM messages WHERE id = ?", echo.id])
+      expect(matched).to be(true), "query=#{service.instance_variable_get(:@query_string)} values=#{service.instance_variable_get(:@filter_values).inspect} raw=#{Message.connection.select_value(raw_message).inspect} marker=#{Message.connection.select_value(raw_marker).inspect} accessor=#{echo.whatsapp_echo_message.inspect}"
     end
 
     it 'does not infer an echo from the shape of an unmarked outgoing message' do

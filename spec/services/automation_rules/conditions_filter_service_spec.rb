@@ -260,8 +260,10 @@ RSpec.describe AutomationRules::ConditionsFilterService do
 
   describe '#perform with whatsapp_echo' do
     it 'matches an explicitly marked outgoing echo' do
-      echo = Message.create!(conversation: conversation, inbox: inbox, message_type: :outgoing,
-                             content: 'sent from WhatsApp', content_attributes: { whatsapp_echo_message: true })
+      echo = conversation.messages.build(inbox: inbox, message_type: :outgoing, content: 'sent from WhatsApp')
+      echo.whatsapp_echo_message = true
+      echo.save!
+      expect(echo.reload.whatsapp_echo_message).to be(true)
       rule = build_rule(conditions: [{
                           'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
                           'values' => ['true'], 'query_operator' => nil

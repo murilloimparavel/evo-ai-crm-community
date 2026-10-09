@@ -257,4 +257,60 @@ RSpec.describe AutomationRules::ConditionsFilterService do
       expect(service.perform).to be(true)
     end
   end
+
+  describe '#perform with whatsapp_echo' do
+    it 'matches an explicitly marked outgoing echo' do
+      echo = Message.create!(conversation: conversation, inbox: inbox, message_type: :outgoing,
+                             content: 'sent from WhatsApp', content_attributes: { whatsapp_echo_message: true })
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      expect(described_class.new(rule, conversation, { message: echo }).perform).to be(true)
+    end
+
+    it 'does not infer an echo from the shape of an unmarked outgoing message' do
+      unmarked = Message.create!(conversation: conversation, inbox: inbox, message_type: :outgoing,
+                                 source_id: 'wamid.test-123', content: 'sent from WhatsApp')
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      expect(described_class.new(rule, conversation, { message: unmarked }).perform).to be(false)
+    end
+
+    it 'does not match a normal outgoing CRM message' do
+      message_sender = user
+      crm_message = Message.create!(conversation: conversation, inbox: inbox, message_type: :outgoing,
+                                    sender: message_sender, content: 'sent from CRM')
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      expect(described_class.new(rule, conversation, { message: crm_message }).perform).to be(false)
+    end
+  end
+
+  describe 'whatsapp_echo condition validation' do
+    it 'accepts the condition for message_created' do
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(true)
+    end
+
+    it 'rejects the condition for other events' do
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'conversation_created')
+
+      expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(false)
+    end
+  end
 end

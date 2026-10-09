@@ -273,10 +273,10 @@ class Whatsapp::ConversationSyncService
       source_id: echo_data[:id],
       created_at: external_timestamp,
       content_attributes: {
-        external_created_at: external_timestamp.iso8601,
-        whatsapp_echo_message: true
+        external_created_at: external_timestamp.iso8601
       }
     )
+    message.whatsapp_echo_message = true
 
     # Attach media content for echo messages
     attach_echo_media_content(message, echo_data)

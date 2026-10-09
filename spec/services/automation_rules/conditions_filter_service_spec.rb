@@ -301,8 +301,8 @@ RSpec.describe AutomationRules::ConditionsFilterService do
     end
   end
 
-  describe 'whatsapp_echo filter value casting' do
-    it 'casts the first UI value to a scalar boolean' do
+  describe 'whatsapp_echo filter values' do
+    it 'accepts the boolean values sent by the UI' do
       service = described_class.new(build_rule(conditions: []), conversation)
 
       expect(service.filter_values('attribute_key' => 'whatsapp_echo', 'values' => ['true'])).to eq(['true'])

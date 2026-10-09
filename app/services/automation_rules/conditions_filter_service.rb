@@ -354,6 +354,8 @@ class AutomationRules::ConditionsFilterService < FilterService
   end
 
   def build_query_string(filters, query_hash, current_index)
+    return whatsapp_echo_query_string(query_hash, current_index) if query_hash['attribute_key'] == 'whatsapp_echo'
+
     # `pipeline_id` also sits in the `conversations` section of filter_keys.yml, so
     # the conversation branch emitted `conversations.pipeline_id` — a missing column.
     return pipeline_query_string(query_hash.with_indifferent_access, current_index) if pipeline_filter?(query_hash['attribute_key'])
@@ -375,6 +377,25 @@ class AutomationRules::ConditionsFilterService < FilterService
     else
       ''
     end
+  end
+
+  # WhatsApp Cloud Business App echoes are explicitly marked by the
+  # smb_message_echoes webhook handler. Do not infer from outgoing/sender/source
+  # fields: other externally-created business messages can share that shape.
+  def whatsapp_echo_query_string(query_hash, current_index)
+    operator = query_hash['filter_operator']
+    filter_operator_value = case operator
+                            when 'equal_to'
+                              @filter_values["value_#{current_index}"] = ActiveModel::Type::Boolean.new.cast(Array(query_hash['values']).first).to_s
+                              "= :value_#{current_index}"
+                            when 'not_equal_to'
+                              @filter_values["value_#{current_index}"] = ActiveModel::Type::Boolean.new.cast(Array(query_hash['values']).first).to_s
+                              "!= :value_#{current_index}"
+                            end
+    query_operator = query_hash['query_operator'].presence || ''
+    echo_expression = "COALESCE((messages.content_attributes::jsonb #>> '{}')::jsonb ->> 'whatsapp_echo_message', 'false')"
+
+    "#{echo_expression} #{filter_operator_value} #{query_operator}"
   end
 
   def pipeline_filter?(attribute_key)

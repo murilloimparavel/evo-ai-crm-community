@@ -257,4 +257,79 @@ RSpec.describe AutomationRules::ConditionsFilterService do
       expect(service.perform).to be(true)
     end
   end
+
+  describe '#perform with whatsapp_echo' do
+    it 'matches an explicitly marked outgoing echo' do
+      echo = conversation.messages.build(inbox: inbox, message_type: :outgoing, content: 'sent from WhatsApp')
+      echo.whatsapp_echo_message = true
+      echo.save!
+      expect(echo.reload.whatsapp_echo_message).to be(true)
+      expect(echo.content_attributes).to include('whatsapp_echo_message' => true)
+      raw_marker = Message.sanitize_sql_array(["SELECT (content_attributes::jsonb #>> '{}')::jsonb ->> 'whatsapp_echo_message' FROM messages WHERE id = ?", echo.id])
+      expect(Message.connection.select_value(raw_marker)).to eq('true')
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      service = described_class.new(rule, conversation, { message: echo })
+      expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(true)
+      expect(service.filter_values(rule.conditions.first)).to eq(['true'])
+      matched = service.perform
+      raw_message = Message.sanitize_sql_array(['SELECT content_attributes::text FROM messages WHERE id = ?', echo.id])
+      expect(matched).to be(true), "query=#{service.instance_variable_get(:@query_string)} values=#{service.instance_variable_get(:@filter_values).inspect} raw=#{Message.connection.select_value(raw_message).inspect} accessor=#{echo.whatsapp_echo_message.inspect}"
+    end
+
+    it 'does not infer an echo from the shape of an unmarked outgoing message' do
+      unmarked = Message.create!(conversation: conversation, inbox: inbox, message_type: :outgoing,
+                                 source_id: 'wamid.test-123', content: 'sent from WhatsApp')
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      expect(described_class.new(rule, conversation, { message: unmarked }).perform).to be(false)
+    end
+
+    it 'does not match a normal outgoing CRM message' do
+      message_sender = user
+      crm_message = Message.create!(conversation: conversation, inbox: inbox, message_type: :outgoing,
+                                    sender: message_sender, content: 'sent from CRM')
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      expect(described_class.new(rule, conversation, { message: crm_message }).perform).to be(false)
+    end
+  end
+
+  describe 'whatsapp_echo filter values' do
+    it 'accepts the boolean values sent by the UI' do
+      service = described_class.new(build_rule(conditions: []), conversation)
+
+      expect(service.filter_values('attribute_key' => 'whatsapp_echo', 'values' => ['true'])).to eq(['true'])
+      expect(service.filter_values('attribute_key' => 'whatsapp_echo', 'values' => ['false'])).to eq(['false'])
+    end
+  end
+
+  describe 'whatsapp_echo condition validation' do
+    it 'accepts the condition for message_created' do
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'message_created')
+
+      expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(true)
+    end
+
+    it 'rejects the condition for other events' do
+      rule = build_rule(conditions: [{
+                          'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
+                          'values' => ['true'], 'query_operator' => nil
+                        }], event_name: 'conversation_created')
+
+      expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(false)
+    end
+  end
 end

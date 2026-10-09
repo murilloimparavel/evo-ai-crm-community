@@ -111,7 +111,8 @@ class Message < ApplicationRecord
                                          :revoked_by_contact, :revoke_propagated,
                                          :external_created_at, :story_sender, :story_id, :external_error,
                                          :translations, :in_reply_to_external_id, :is_unsupported,
-                                         :is_reaction, :is_edited, :previous_content], coder: JSON
+                                         :is_reaction, :is_edited, :previous_content,
+                                         :whatsapp_echo_message], coder: JSON
 
   store :external_source_ids, accessors: [:slack], coder: JSON, prefix: :external_source_id
 

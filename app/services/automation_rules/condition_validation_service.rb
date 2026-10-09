@@ -32,6 +32,7 @@ class AutomationRules::ConditionValidationService
 
   def valid_condition?(condition)
     key = condition['attribute_key']
+    return false if key == 'whatsapp_echo' && @rule.event_name != 'message_created'
 
     conversation_filter = @conversation_filters[key]
     contact_filter = @contact_filters[key]

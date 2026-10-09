@@ -84,4 +84,5 @@ jobs:
             spec/listeners/action_cable_listener_audience_spec.rb \
             spec/rbac \
             spec/requests/api/v1/*_rbac_spec.rb \
+            spec/services/automation_rules/conditions_filter_service_spec.rb \
             --format progress

@@ -49,7 +49,6 @@ class FilterService
     return conversation_status_values(values) if attribute_key == 'status'
     return conversation_priority_values(values) if attribute_key == 'priority'
     return message_type_values(values) if attribute_key == 'message_type'
-    return [ActiveModel::Type::Boolean.new.cast(Array(values).first).to_s] if attribute_key == 'whatsapp_echo'
     return downcase_array_values(values) if attribute_key == 'content'
 
     case_insensitive_values(query_hash)

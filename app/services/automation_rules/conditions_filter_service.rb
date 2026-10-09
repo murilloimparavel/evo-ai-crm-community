@@ -359,7 +359,15 @@ class AutomationRules::ConditionsFilterService < FilterService
   # smb_message_echoes webhook handler. Do not infer from outgoing/sender/source
   # fields: other externally-created business messages can share that shape.
   def whatsapp_echo_query_string(query_hash, current_index)
-    filter_operator_value = filter_operation(query_hash, current_index)
+    operator = query_hash['filter_operator']
+    filter_operator_value = case operator
+                            when 'equal_to'
+                              @filter_values["value_#{current_index}"] = ActiveModel::Type::Boolean.new.cast(Array(query_hash['values']).first).to_s
+                              "= :value_#{current_index}"
+                            when 'not_equal_to'
+                              @filter_values["value_#{current_index}"] = ActiveModel::Type::Boolean.new.cast(Array(query_hash['values']).first).to_s
+                              "!= :value_#{current_index}"
+                            end
     query_operator = query_hash['query_operator'].presence || ''
     echo_expression = "COALESCE(messages.content_attributes::jsonb ->> 'whatsapp_echo_message', 'false')"
 

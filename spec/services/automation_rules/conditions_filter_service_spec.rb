@@ -240,12 +240,16 @@ RSpec.describe AutomationRules::ConditionsFilterService do
       echo.whatsapp_echo_message = true
       echo.save!
       expect(echo.reload.whatsapp_echo_message).to be(true)
+      expect(echo.content_attributes).to include('whatsapp_echo_message' => true)
       rule = build_rule(conditions: [{
                           'attribute_key' => 'whatsapp_echo', 'filter_operator' => 'equal_to',
                           'values' => ['true'], 'query_operator' => nil
                         }], event_name: 'message_created')
 
-      expect(described_class.new(rule, conversation, { message: echo }).perform).to be(true)
+      service = described_class.new(rule, conversation, { message: echo })
+      expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(true)
+      expect(service.filter_values(rule.conditions.first)).to be(true)
+      expect(service.perform).to be(true)
     end
 
     it 'does not infer an echo from the shape of an unmarked outgoing message' do

@@ -36,8 +36,7 @@ RSpec.describe AutomationRules::ConditionsFilterService do
 
     it 'matches when previous and current are inside from/to' do
       service = described_class.new(rule, conversation, changed_attributes: { 'status' => %w[open resolved] })
-      matched = service.perform
-      expect(matched).to be(true), "query=#{service.instance_variable_get(:@query_string)} values=#{service.instance_variable_get(:@filter_values).inspect} relation=#{service.send(:base_relation).to_sql}"
+      expect(service.perform).to be(true)
     end
 
     it 'does not match when previous is not in from' do
@@ -274,7 +273,8 @@ RSpec.describe AutomationRules::ConditionsFilterService do
       service = described_class.new(rule, conversation, { message: echo })
       expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(true)
       expect(service.filter_values(rule.conditions.first)).to be(true)
-      expect(service.perform).to be(true)
+      matched = service.perform
+      expect(matched).to be(true), "query=#{service.instance_variable_get(:@query_string)} values=#{service.instance_variable_get(:@filter_values).inspect} relation=#{service.send(:base_relation).to_sql}"
     end
 
     it 'does not infer an echo from the shape of an unmarked outgoing message' do

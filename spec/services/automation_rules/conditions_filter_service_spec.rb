@@ -272,7 +272,7 @@ RSpec.describe AutomationRules::ConditionsFilterService do
 
       service = described_class.new(rule, conversation, { message: echo })
       expect(AutomationRules::ConditionValidationService.new(rule).perform).to be(true)
-      expect(service.filter_values(rule.conditions.first)).to be(true)
+      expect(service.filter_values(rule.conditions.first)).to eq(['true'])
       matched = service.perform
       expect(matched).to be(true), "query=#{service.instance_variable_get(:@query_string)} values=#{service.instance_variable_get(:@filter_values).inspect} relation=#{service.send(:base_relation).to_sql}"
     end
@@ -305,8 +305,8 @@ RSpec.describe AutomationRules::ConditionsFilterService do
     it 'casts the first UI value to a scalar boolean' do
       service = described_class.new(build_rule(conditions: []), conversation)
 
-      expect(service.filter_values('attribute_key' => 'whatsapp_echo', 'values' => ['true'])).to be(true)
-      expect(service.filter_values('attribute_key' => 'whatsapp_echo', 'values' => ['false'])).to be(false)
+      expect(service.filter_values('attribute_key' => 'whatsapp_echo', 'values' => ['true'])).to eq(['true'])
+      expect(service.filter_values('attribute_key' => 'whatsapp_echo', 'values' => ['false'])).to eq(['false'])
     end
   end
 

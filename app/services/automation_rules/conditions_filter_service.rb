@@ -385,7 +385,7 @@ class AutomationRules::ConditionsFilterService < FilterService
   def whatsapp_echo_query_string(query_hash, current_index)
     filter_operator_value = filter_operation(query_hash, current_index)
     query_operator = query_hash['query_operator'].presence || ''
-    echo_expression = "COALESCE(messages.content_attributes::jsonb ->> 'whatsapp_echo_message' = 'true', FALSE)"
+    echo_expression = "COALESCE(messages.content_attributes::jsonb ->> 'whatsapp_echo_message', 'false')"
 
     "#{echo_expression} #{filter_operator_value} #{query_operator}"
   end

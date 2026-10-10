@@ -8,6 +8,8 @@ module Whatsapp
 
         def sync_template_to_database(template_data)
           content = extract_template_content(template_data)
+          definition = WhatsappTemplateDefinition.find_by(name: template_data['name'],
+                                                          language: template_data['language'] || 'pt_BR')
 
           template = MessageTemplate.find_or_initialize_by(
             channel: whatsapp_channel,
@@ -20,7 +22,7 @@ module Whatsapp
             category: template_data['category'],
             template_type: determine_template_type(template_data),
             components: extract_components_hash(template_data),
-            variables: extract_template_variables(template_data),
+            variables: definition&.variables.presence || extract_template_variables(template_data),
             settings: {
               'status' => template_data['status'],
               'quality_score' => template_data['quality_score'],
@@ -29,7 +31,8 @@ module Whatsapp
             metadata: {
               'external_id' => template_data['id'],
               'namespace' => template_data['namespace'],
-              'rejected_reason' => template_data['rejected_reason']
+              'rejected_reason' => template_data['rejected_reason'],
+              'parameter_format' => template_data['parameter_format']
             }.compact
           }
 
@@ -43,9 +46,54 @@ module Whatsapp
 
           template.assign_attributes(attrs)
           template.save!
+          sync_publication_status(template_data)
+          template
         rescue StandardError => e
           Rails.logger.error "Error syncing template #{template_data['name']}: #{e.message}"
           Rails.logger.error e.backtrace.join("\n")
+        end
+
+        def sync_publication_status(template_data)
+          config = whatsapp_channel.provider_config.to_h
+          waba_id = config['waba_id'].presence || config['business_account_id'].presence
+          external_id = template_data['id'].to_s
+          return if waba_id.blank? || external_id.blank?
+
+          definition = WhatsappTemplateDefinition.find_by(name: template_data['name'],
+                                                          language: template_data['language'] || 'pt_BR')
+          publication = WhatsappTemplatePublication.find_by(waba_id: waba_id.to_s, external_template_id: external_id)
+          if publication.nil?
+            publication = definition&.publications&.find_by(waba_id: waba_id.to_s,
+                                                             status: %w[submitting submission_unknown])
+            if publication && same_template_components?(definition.components, template_data['components'])
+              publication.update!(external_template_id: external_id,
+                                  submitted_at: publication.submitted_at || Time.current)
+            else
+              publication = nil
+            end
+          end
+          return unless publication
+
+          publication.apply_meta_status!(raw_status: template_data['status'],
+                                         reason: template_data['rejected_reason'],
+                                         category: template_data['category'],
+                                         quality: template_data.dig('quality_score', 'score') || template_data['quality_score'],
+                                         meta_data: { 'last_sync_source' => 'waba_catalog' })
+        end
+
+        def same_template_components?(definition_components, meta_components)
+          normalize = lambda do |components|
+            Array(components).map do |component|
+              normalized = component.slice('type', 'format', 'text')
+              if component['type'] == 'BUTTONS'
+                normalized['buttons'] = Array(component['buttons']).map do |button|
+                  button.slice('type', 'text', 'url', 'phone_number')
+                end
+              end
+              normalized
+            end
+          end
+          normalize.call(definition_components) == normalize.call(meta_components)
         end
 
         def extract_template_content(template_data)

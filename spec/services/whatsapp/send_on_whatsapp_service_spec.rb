@@ -18,6 +18,42 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
   end
   let(:message) { instance_double(Message, conversation: conversation, additional_attributes: nil) }
 
+  describe '#cloud_template_components' do
+    let(:provider) { 'whatsapp_cloud' }
+    let(:contact_inbox_source_id) { '5511999999999' }
+    let(:additional_attributes) { {} }
+
+    it 'builds named parameters separately for header and body' do
+      template = instance_double(MessageTemplate,
+                                  components: [
+                                    { 'type' => 'HEADER', 'text' => 'Olá {{customer_name}}' },
+                                    { 'type' => 'BODY', 'text' => 'Pedido {{order_id}}' }
+                                  ],
+                                  metadata: { 'parameter_format' => 'NAMED' })
+
+      result = service.send(:cloud_template_components, template,
+                            'processed_params' => { 'customer_name' => 'Ana', 'order_id' => '42' })
+
+      expect(result).to eq([
+        { type: 'header', parameters: [{ type: 'text', parameter_name: 'customer_name', text: 'Ana' }] },
+        { type: 'body', parameters: [{ type: 'text', parameter_name: 'order_id', text: '42' }] }
+      ])
+    end
+
+    it 'orders positional body parameters by their placeholder number' do
+      template = instance_double(MessageTemplate,
+                                  components: [{ 'type' => 'BODY', 'text' => '{{2}} then {{1}}' }],
+                                  metadata: { 'parameter_format' => 'POSITIONAL' })
+
+      result = service.send(:cloud_template_components, template,
+                            'processed_params' => { '1' => 'first', '2' => 'second' })
+
+      expect(result).to eq([
+        { type: 'body', parameters: [{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }] }
+      ])
+    end
+  end
+
   describe '#determine_target_number_for_sending — group routing' do
     context 'when provider is evolution_go and conversation has a group chat id' do
       let(:provider) { 'evolution_go' }
@@ -406,6 +442,12 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
       end
 
       it 'marks the message failed with the Meta reason (the evidence case: sent + source_id NULL)' do
+        template_record = instance_double(MessageTemplate, approval_status: 'approved',
+                                                           components: [{ 'type' => 'BODY', 'text' => 'Hi' }],
+                                                           metadata: {})
+        active_templates = double('active templates', find_by: template_record)
+        templates = double('templates', active: active_templates)
+        allow(channel).to receive(:message_templates).and_return(templates)
         allow(provider_service).to receive(:send_template).and_return(nil)
         status_service = instance_double(Messages::StatusUpdateService, perform: true)
 

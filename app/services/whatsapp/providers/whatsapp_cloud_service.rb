@@ -30,7 +30,7 @@ module Whatsapp
       end
 
       def preserve_non_json_error_body?
-        true
+        false
       end
 
       def send_template(phone_number, template_info)
@@ -88,7 +88,7 @@ module Whatsapp
           sync_template_to_database(template_data)
         end
       rescue StandardError => e
-        Rails.logger.error "WhatsApp Cloud sync_templates error: #{e.message}"
+        Rails.logger.error "WhatsApp Cloud sync_templates failed for channel #{whatsapp_channel.id} (#{e.class})"
         Rails.logger.error e.backtrace.join("\n")
       end
 
@@ -115,7 +115,7 @@ module Whatsapp
         unless response.success?
           Rails.logger.error(
             "WhatsApp Cloud fetch_whatsapp_templates: non-success response " \
-            "channel=#{whatsapp_channel.id} status=#{response.code} body=#{response.body.to_s.truncate(500)}"
+            "channel=#{whatsapp_channel.id} status=#{response.code}"
           )
           return []
         end
@@ -143,7 +143,7 @@ module Whatsapp
         return :ok if response.success?
 
         Rails.logger.info "WhatsApp Cloud validation failed for channel #{whatsapp_channel.id}: " \
-                          "status=#{response.code} body=#{response.body}"
+                          "status=#{response.code}"
         credential_rejected?(response) ? :rejected : :inconclusive
       end
 
@@ -192,7 +192,7 @@ module Whatsapp
         end
         fetched
       rescue StandardError => e
-        Rails.logger.error("[WhatsappCloud] hub channel_token fetch failed: #{e.message}")
+          Rails.logger.error("[WhatsappCloud] hub channel_token fetch failed (#{e.class})")
         nil
       end
 
@@ -247,16 +247,17 @@ module Whatsapp
       end
 
       def template_body_parameters(template_info)
+        components = template_info[:components].presence || [{
+          type: 'body',
+          parameters: template_info[:parameters]
+        }]
         {
           name: template_info[:name],
           language: {
             policy: 'deterministic',
             code: template_info[:lang_code]
           },
-          components: [{
-            type: 'body',
-            parameters: template_info[:parameters]
-          }]
+          components: components
         }
       end
 
@@ -287,9 +288,6 @@ module Whatsapp
       end
 
       def create_template(template_data)
-        Rails.logger.info "WhatsApp Cloud create_template request URL: #{business_account_path}/message_templates"
-        Rails.logger.info "WhatsApp Cloud create_template request headers: #{api_headers.inspect}"
-
         # Processar componentes para adicionar examples quando necessário
         processed_components = process_template_components(template_data['components'])
 
@@ -299,6 +297,7 @@ module Whatsapp
           language: template_data['language'],
           components: processed_components
         }
+        request_body[:parameter_format] = template_data['parameter_format'] if template_data['parameter_format'].present?
 
         # Adicionar message_send_ttl_seconds apenas se fornecido
         if template_data['message_send_ttl_seconds'].present?
@@ -306,7 +305,6 @@ module Whatsapp
             template_data['message_send_ttl_seconds']
         end
 
-        Rails.logger.info "WhatsApp Cloud create_template request body: #{request_body.to_json}"
 
         # Garantir encoding UTF-8 correto
         json_body = ensure_utf8_encoding(request_body.to_json)
@@ -317,25 +315,46 @@ module Whatsapp
           body: json_body
         )
 
-        Rails.logger.info "WhatsApp Cloud create_template response status: #{response.code}"
-        Rails.logger.info "WhatsApp Cloud create_template response body: #{response.body}"
-
         unless response.success?
-          error_details = parse_whatsapp_error(response)
-          Rails.logger.error "WhatsApp template creation failed: #{error_details}"
-          raise StandardError, error_details
+          details = safe_template_submission_error(response)
+          Rails.logger.error "WhatsApp template creation failed with HTTP #{response.code}"
+          raise StandardError, details
         end
 
         # Atualizar a lista de templates após criar um novo
         sync_templates
-        whatsapp_channel.message_templates.reload.find_by(name: template_data['name']) ||
-          whatsapp_channel.message_templates.order(created_at: :desc).first
+        response_data = response.parsed_response
+        response_data = JSON.parse(response.body.to_s) unless response_data.is_a?(Hash)
+        external_id = response_data.is_a?(Hash) ? response_data['id'].to_s : nil
+        synced_template = if external_id.present?
+                            whatsapp_channel.message_templates.find_by("metadata ->> 'external_id' = ?", external_id)
+                          end
+        return synced_template if synced_template
+
+        # Sync can fail transiently after Meta accepted the submission. Persist
+        # the exact returned ID locally so retries and webhooks reconcile the
+        # right WABA template instead of returning an unrelated newest row.
+        body = Array(template_data['components']).find { |component| component['type'] == 'BODY' }
+        template = whatsapp_channel.message_templates.find_or_initialize_by(
+          name: template_data['name'], language: template_data['language'] || 'pt_BR'
+        )
+        template.assign_attributes(
+          content: body&.dig('text') || template_data['content'] || 'Template content',
+          category: response_data.is_a?(Hash) ? (response_data['category'] || template_data['category']) : template_data['category'],
+          template_type: 'interactive', components: template_data['components'],
+          variables: template_data['variables'] || [],
+          settings: { 'status' => response_data.is_a?(Hash) ? (response_data['status'] || 'PENDING') : 'PENDING' },
+          metadata: { 'external_id' => external_id.presence,
+                      'parameter_format' => template_data['parameter_format'],
+                      'waba_id' => whatsapp_channel.provider_config['waba_id'] }.compact
+        )
+        template.save!
+        template
       end
 
       def update_template(template_id, template_data)
         Rails.logger.info '=== UPDATE WHATSAPP TEMPLATE START ==='
         Rails.logger.info "WhatsApp Cloud update_template template_id: #{template_id}"
-        Rails.logger.info "WhatsApp Cloud update_template template_data: #{template_data.inspect}"
 
         template = find_template_by_id(template_id)
         validate_template_editable(template)
@@ -343,12 +362,9 @@ module Whatsapp
         # Para editar templates, usar o endpoint específico do template
         update_url = "#{api_base_path}/#{template_id}"
         Rails.logger.info "WhatsApp Cloud update_template request URL: #{update_url}"
-        Rails.logger.info "WhatsApp Cloud update_template request headers: #{api_headers.inspect}"
 
         request_body = build_update_request_body(template, template_data)
         validate_update_request_body(request_body)
-
-        Rails.logger.info "WhatsApp Cloud update_template request body: #{request_body.to_json}"
 
         response = send_update_request(update_url, request_body)
         handle_update_response(response, template_id)
@@ -366,10 +382,8 @@ module Whatsapp
 
         Rails.logger.info "Found template to delete: #{template['name']} (#{template['language']})"
         Rails.logger.info "WhatsApp Cloud delete_template request URL: #{business_account_path}/message_templates"
-        Rails.logger.info "WhatsApp Cloud delete_template request headers: #{api_headers.inspect}"
 
         request_body = { name: template['name'] }
-        Rails.logger.info "WhatsApp Cloud delete_template request body: #{request_body.to_json}"
 
         response = HTTParty.delete(
           "#{business_account_path}/message_templates",
@@ -381,6 +395,18 @@ module Whatsapp
       end
 
       private
+
+      def safe_template_submission_error(response)
+        body = response.parsed_response
+        body = JSON.parse(response.body.to_s) unless body.is_a?(Hash)
+        error = body.is_a?(Hash) ? body['error'].to_h : {}
+        message = error['error_user_msg'].presence || error['message'].presence || 'Meta rejected the template request'
+        message = message.to_s.gsub(/Bearer\s+[^\s"']+/i, '[REDACTED]')
+        message = message.gsub(/(?:access_token|api_key|channel_token|token)=[^\s&"']+/i, '[REDACTED]')
+        "Meta template submission failed (HTTP #{response.code}): #{message.truncate(300)}"
+      rescue StandardError
+        "Meta template submission failed (HTTP #{response.code})"
+      end
 
       def credential_rejected?(response)
         return true if [401, 403].include?(response.code)
@@ -549,7 +575,7 @@ module Whatsapp
           )
         end
 
-        Rails.logger.info "Media upload response: #{response.code} - #{response.body}"
+        Rails.logger.info "Media upload response status: #{response.code}"
 
         unless response.success?
           error_details = parse_whatsapp_error(response)
@@ -672,7 +698,6 @@ module Whatsapp
 
       def handle_update_response(response, template_id)
         Rails.logger.info "WhatsApp Cloud update_template response status: #{response.code}"
-        Rails.logger.info "WhatsApp Cloud update_template response body: #{response.body}"
 
         unless response.success?
           error_details = parse_whatsapp_error(response)
@@ -699,7 +724,6 @@ module Whatsapp
 
       def handle_delete_response(response)
         Rails.logger.info "WhatsApp Cloud delete_template response status: #{response.code}"
-        Rails.logger.info "WhatsApp Cloud delete_template response body: #{response.body}"
 
         unless response.success?
           error_details = parse_whatsapp_error(response)
@@ -722,18 +746,35 @@ module Whatsapp
           case component['type']
           when 'HEADER'
             # Se o texto do header contém variáveis {{1}}, adicionar example
-            if component['format'] == 'TEXT' && component['text'].present? && component['text'].include?('{{')
-              processed_component['example'] = {
-                'header_text' => [component['text'].gsub(/\{\{\d+\}\}/, 'Example')]
-              }
+            if component['format'] == 'TEXT' && component['text'].present? && component['text'].include?('{{') && processed_component['example'].blank?
+              names = component['text'].scan(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/).flatten.uniq
+              named = names.any? { |name| name.match?(/\A[a-zA-Z_]/) }
+              names.sort_by!(&:to_i) unless named
+              processed_component['example'] = if named
+                                                  { 'header_text_named_params' => names.map do |name|
+                                                    { 'param_name' => name, 'example' => 'Example' }
+                                                  end }
+                                                else
+                                                  { 'header_text' => names.map { 'Example' } }
+                                                end
             end
           when 'BODY'
-            if component['text'].present? && component['text'].include?('{{')
+            if component['text'].present? && component['text'].include?('{{') && processed_component['example'].blank?
               # Se o texto do body contém variáveis, adicionar example
-              example_text = component['text'].gsub(/\{\{\d+\}\}/, 'Example')
-              processed_component['example'] = {
-                'body_text' => [[example_text]]
-              }
+              names = component['text'].scan(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/).flatten.uniq
+              named = names.any? { |name| name.match?(/\A[a-zA-Z_]/) }
+              names.sort_by!(&:to_i) unless named
+              if named
+                processed_component['example'] = {
+                  'body_text_named_params' => names.map do |name|
+                    { 'param_name' => name, 'example' => 'Example' }
+                  end
+                }
+              else
+                processed_component['example'] = {
+                  'body_text' => [names.map { 'Example' }]
+                }
+              end
             end
           when 'BUTTONS'
             # Processar botões se necessário
@@ -774,6 +815,8 @@ module Whatsapp
           if error_data && error_data['error']
             error_info = error_data['error']
             message = error_info['message'] || 'Unknown error'
+            message = message.to_s.gsub(/Bearer\s+[^\s"']+/i, '[REDACTED]')
+                                 .gsub(/(?:access_token|api_key|channel_token|token)=[^\s&"']+/i, '[REDACTED]')
             error_code = error_info['code'] || response.code
             error_subcode = error_info['error_subcode']
 
@@ -787,7 +830,7 @@ module Whatsapp
           Rails.logger.error "Error parsing WhatsApp response: #{e.message}"
         end
 
-        "Error creating template. Status: #{response.code}, Body: #{response.body}"
+        "Error creating template. Status: #{response.code}"
       end
 
       def ensure_utf8_encoding(json_string)

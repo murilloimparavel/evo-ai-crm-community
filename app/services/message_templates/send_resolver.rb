@@ -32,6 +32,8 @@ class MessageTemplates::SendResolver
   def resolve_by_id
     template = MessageTemplate.active.find_by(id: @id)
     return nil if template.nil?
+    return nil if cloud_channel?(@channel) && global?(template)
+    return nil if whatsapp_cloud_template?(template) && template.approval_status != 'approved'
     return template if global?(template) || visible_to_channel?(template)
 
     # An id that resolves to a different channel (or a different channel TYPE)
@@ -43,7 +45,8 @@ class MessageTemplates::SendResolver
     return nil if @name.blank?
 
     channel_match = @channel&.message_templates&.active&.find_by(name: @name, language: @language)
-    return channel_match if channel_match
+    return channel_match if channel_match && approved_for_cloud?(channel_match)
+    return nil if cloud_channel?(@channel)
 
     MessageTemplate.where(channel_id: nil).active.find_by(name: @name, language: @language)
   end
@@ -56,5 +59,20 @@ class MessageTemplates::SendResolver
     return false if @channel.nil?
 
     template.channel_type == @channel.class.name && template.channel_id == @channel.id
+  end
+
+  def whatsapp_cloud_template?(template)
+    template.channel_type == 'Channel::Whatsapp' &&
+      Channel::Whatsapp.where(id: template.channel_id, provider: 'whatsapp_cloud').exists?
+  end
+
+  def cloud_channel?(channel)
+    channel.is_a?(Channel::Whatsapp) && channel.provider == 'whatsapp_cloud'
+  end
+
+  def approved_for_cloud?(template)
+    return true unless cloud_channel?(@channel)
+
+    whatsapp_cloud_template?(template) && template.approval_status == 'approved'
   end
 end

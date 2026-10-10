@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_10_01_100000) do
+ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1369,6 +1369,40 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_01_100000) do
     t.index ["url"], name: "index_webhooks_on_url", unique: true
   end
 
+  create_table "whatsapp_template_definitions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "name", null: false
+    t.string "language", default: "pt_BR", null: false
+    t.string "category", null: false
+    t.text "content", null: false
+    t.jsonb "components", default: [], null: false
+    t.jsonb "variables", default: [], null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name", "language"], name: "idx_wa_template_definitions_name_language", unique: true
+  end
+
+  create_table "whatsapp_template_publications", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "whatsapp_template_definition_id", null: false
+    t.string "waba_id", null: false
+    t.string "external_template_id"
+    t.string "status", default: "not_submitted", null: false
+    t.string "raw_status"
+    t.string "meta_category"
+    t.string "quality"
+    t.text "rejected_reason"
+    t.text "operational_error"
+    t.jsonb "meta_data", default: {}, null: false
+    t.datetime "submitted_at"
+    t.datetime "synced_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["waba_id", "external_template_id"], name: "idx_wa_tpl_pubs_waba_external", unique: true, where: "(external_template_id IS NOT NULL)"
+    t.index ["waba_id", "status"], name: "idx_wa_tpl_pubs_waba_status"
+    t.index ["whatsapp_template_definition_id", "waba_id"], name: "idx_wa_tpl_pubs_definition_waba", unique: true
+    t.index ["whatsapp_template_definition_id"], name: "idx_wa_tpl_pubs_definition"
+  end
+
   create_table "working_hours", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "inbox_id"
     t.integer "day_of_week", null: false
@@ -1427,4 +1461,5 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_01_100000) do
   add_foreign_key "user_roles", "roles"
   add_foreign_key "user_roles", "users"
   add_foreign_key "user_roles", "users", column: "granted_by_id"
+  add_foreign_key "whatsapp_template_publications", "whatsapp_template_definitions", name: "fk_wa_template_publications_definition", on_delete: :cascade
 end

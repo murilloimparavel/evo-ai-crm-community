@@ -25,6 +25,15 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
     )
   end
 
+  let!(:definition) do
+    WhatsappTemplateDefinition.create!(name: "wac_def_#{SecureRandom.hex(3)}", language: 'pt_BR', category: 'UTILITY',
+                                       content: 'Hi', components: [{ 'type' => 'BODY', 'text' => 'Hi' }])
+  end
+
+  let!(:publication) do
+    definition.publications.create!(waba_id: waba_id, external_template_id: '12345', status: 'pending')
+  end
+
   # find_channel_by_waba_id joins(:inbox), so the channel needs an inbox.
   before { Inbox.create!(channel: channel, name: "Inbox #{SecureRandom.hex(3)}") }
 
@@ -65,6 +74,7 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
     template.reload
     expect(template.settings['status']).to eq('APPROVED')
     expect(template.approval_status).to eq('approved')
+    expect(publication.reload).to have_attributes(status: 'approved', raw_status: 'APPROVED')
   end
 
   it 'records the rejection reason on REJECTED' do
@@ -74,6 +84,7 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
     expect(template.settings['status']).to eq('REJECTED')
     expect(template.approval_status).to eq('rejected')
     expect(template.metadata['rejected_reason']).to eq('INVALID_FORMAT')
+    expect(publication.reload).to have_attributes(status: 'rejected', rejected_reason: 'INVALID_FORMAT')
   end
 
   it 'is a no-op (no error) when no template matches the external id' do

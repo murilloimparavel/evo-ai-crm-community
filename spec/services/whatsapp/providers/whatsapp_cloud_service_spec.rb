@@ -243,9 +243,9 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       expect(service.last_delivery_error).to be_nil
     end
 
-    # Proxy/CDN failures parse to a String body (no JSON) — error_message must
-    # not blow up on String#dig and should surface the raw body instead.
-    it 'falls back to the raw body when the error response is not JSON' do
+    # Proxy/CDN failures can contain arbitrary upstream content; keep the error
+    # actionable without exposing or persisting the raw body.
+    it 'does not expose the raw body when the error response is not JSON' do
       rejection = instance_double(
         HTTParty::Response,
         success?: false,
@@ -255,7 +255,7 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
       allow(HTTParty).to receive(:post).and_return(rejection)
 
       expect(service.send_template('5511999999999', template_info)).to be_nil
-      expect(service.last_delivery_error).to eq('<html>502 Bad Gateway</html>')
+      expect(service.last_delivery_error).not_to include('<html>502 Bad Gateway</html>')
     end
 
     # Real rejection shape from a template with a dynamic URL button missing
@@ -278,6 +278,20 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
 
       expect(service.send_template('5511999999999', template_info)).to be_nil
       expect(service.last_delivery_error).to eq('(#131008) Required parameter is missing')
+    end
+  end
+
+  describe '#template_body_parameters' do
+    it 'preserves explicit Meta components for text headers and body variables' do
+      payload = service.send(:template_body_parameters,
+                             name: 'order_update', lang_code: 'pt_BR', parameters: [],
+                             components: [
+                               { type: 'header', parameters: [{ type: 'text', parameter_name: 'name', text: 'Ana' }] },
+                               { type: 'body', parameters: [{ type: 'text', parameter_name: 'id', text: '42' }] }
+                             ])
+
+      expect(payload[:components].map { |component| component[:type] }).to eq(%w[header body])
+      expect(payload[:components].last[:parameters].first[:parameter_name]).to eq('id')
     end
   end
 end

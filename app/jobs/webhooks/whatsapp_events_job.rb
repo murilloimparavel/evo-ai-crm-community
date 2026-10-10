@@ -117,15 +117,28 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     return if external_id.blank? || new_status.blank?
 
     # params is already with_indifferent_access here, so digging the WABA id is safe.
-    template = find_template_for_waba(params.dig(:entry, 0, :id), external_id)
-    if template.nil?
+    waba_id = params.dig(:entry, 0, :id).to_s
+    templates = find_templates_for_waba(waba_id, external_id)
+    if templates.empty?
       Rails.logger.warn "[WHATSAPP] template_status_update: no template for external_id #{external_id}"
-      return
+    else
+      templates.each do |template|
+        new_settings = template.settings.to_h.merge('status' => new_status)
+        new_metadata = template.metadata.to_h
+        new_metadata['rejected_reason'] = reason if reason.present?
+
+        # update_columns avoids rerunning channel validation on a provider event.
+        template.update_columns(settings: new_settings, metadata: new_metadata, updated_at: Time.current)
+      end
     end
 
-    new_settings = template.settings.to_h.merge('status' => new_status)
-    new_metadata = template.metadata.to_h
-    new_metadata['rejected_reason'] = reason if reason.present?
+    publication = WhatsappTemplatePublication.find_by(waba_id: waba_id, external_template_id: external_id)
+    quality = value[:quality_score]
+    quality = quality[:score] if quality.is_a?(Hash)
+    publication&.apply_meta_status!(raw_status: new_status, reason: reason,
+                                    category: value[:message_template_category],
+                                    quality: quality,
+                                    meta_data: { 'last_webhook_event' => 'message_template_status_update' })
 
     # update_columns skips before_save/validations: a webhook status write must
     # not be rejected by the WhatsApp Cloud channel validation nor re-run
@@ -148,8 +161,8 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
   # Note: unlike find_channel_by_waba_id we intentionally omit joins(:inbox) — a
   # template can legitimately be owned by a channel without an inbox, and only the
   # template (not the inbox) is needed here.
-  def find_template_for_waba(waba_id, external_id)
-    return nil if waba_id.blank?
+  def find_templates_for_waba(waba_id, external_id)
+    return MessageTemplate.none if waba_id.blank?
 
     channel_ids = Channel::Whatsapp
                   .where(provider: 'whatsapp_cloud')
@@ -163,7 +176,13 @@ class Webhooks::WhatsappEventsJob < ApplicationJob
     # polymorphic channel_type stored on templates is the literal class name.
     MessageTemplate
       .where(channel_type: 'Channel::Whatsapp', channel_id: channel_ids)
-      .find_by("metadata ->> 'external_id' = ?", external_id)
+      .where("metadata ->> 'external_id' = ?", external_id)
+  end
+
+  # Backward-compatible reader retained for existing callers/specs; webhook
+  # processing itself updates every local channel copy via find_templates_for_waba.
+  def find_template_for_waba(waba_id, external_id)
+    find_templates_for_waba(waba_id, external_id).first
   end
 
   def handle_account_update(channel, params)

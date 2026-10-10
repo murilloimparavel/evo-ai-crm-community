@@ -21,6 +21,16 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
 
     return if name.blank?
 
+    if channel.provider == 'whatsapp_cloud'
+      template_record = channel.message_templates.active.find_by(name: name, language: lang_code)
+      unless template_record&.approval_status == 'approved'
+        handle_send_result(nil, channel.provider_service,
+                           'WhatsApp Cloud template is not approved or is unavailable for this inbox')
+        return
+      end
+      processed_parameters = cloud_template_components(template_record, template_params)
+    end
+
     # Use contact identifier if available (for Evolution Go SenderAlt), otherwise fallback to source_id
     target_number = determine_target_number_for_sending
 
@@ -33,7 +43,8 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
                                           name: name,
                                           namespace: namespace,
                                           lang_code: lang_code,
-                                          parameters: processed_parameters
+                                          parameters: processed_parameters,
+                                          components: processed_parameters.is_a?(Array) && processed_parameters.first&.key?(:type) ? processed_parameters : nil
                                         })
 
     handle_send_result(message_id, provider, 'Template delivery failed: provider returned an error response')
@@ -101,7 +112,7 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     template = template(template_params)
     return if template.blank?
 
-    parameter_format = template['parameter_format']
+    parameter_format = template['parameter_format'] || template.metadata.to_h['parameter_format']
 
     if parameter_format == 'NAMED'
       template_params['processed_params']&.map { |key, value| { type: 'text', parameter_name: key, text: value } }
@@ -110,13 +121,42 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     end
   end
 
-  def validated_body_object(template)
-    # we don't care if its not approved template
-    return if template['status'] != 'approved'
+  def cloud_template_components(template, template_params)
+    values = template_params.to_h['processed_params'] || {}
+    components = template.components.is_a?(Hash) ? template.components.values : Array(template.components)
+    resolved_components = components.filter_map do |component|
+      type = component['type'].to_s.downcase
+      next unless %w[header body].include?(type)
 
-    # we only care about text body object in template. if not present we discard the template
-    # we don't support other forms of templates
-    template['components'].find { |obj| obj['type'] == 'BODY' && obj.key?('text') }
+      text = component['text'].to_s
+      names = text.scan(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/).flatten
+      parameter_format = template.metadata.to_h['parameter_format']
+      names = names.sort_by(&:to_i) if parameter_format != 'NAMED'
+      parameters = names.map do |name|
+        value = values[name] || values[name.to_sym] || ''
+        if parameter_format == 'NAMED'
+          { type: 'text', parameter_name: name, text: value }
+        else
+          { type: 'text', text: value }
+        end
+      end
+      { type: type, parameters: parameters } if parameters.any?
+    end
+    return resolved_components if resolved_components.any?
+
+    values.map do |_key, value|
+      { type: 'text', text: value.to_s }
+    end.then { |parameters| parameters.empty? ? [] : [{ type: 'body', parameters: parameters }] }
+  end
+
+  def validated_body_object(template)
+    status = template.respond_to?(:approval_status) ? template.approval_status :
+      (template['approval_status'] || template['status']).to_s.downcase
+    return unless status == 'approved'
+
+    components = template.respond_to?(:components) ? template.components : template['components']
+    components = components.is_a?(Hash) ? components.values : Array(components)
+    components.find { |component| component['type'] == 'BODY' && component.key?('text') }
   end
 
   def send_session_message

@@ -178,10 +178,18 @@ module Api
 
       def filtered_templates
         scope = base_scope.active
+        scope = scope.where("UPPER(settings ->> 'status') = 'APPROVED'") if approved_cloud_send_scope?
         scope = scope.by_category(params[:category]) if params[:category].present?
         scope = scope.by_type(params[:template_type]) if params[:template_type].present?
         scope = scope.search_by_name(params[:search]) if params[:search].present?
         params[:sort_by] == 'name' ? scope.order(:name) : scope.recently_created
+      end
+
+      def approved_cloud_send_scope?
+        return false unless params[:for_sending].to_s == 'true' && params[:inbox_id].present?
+
+        channel = Inbox.find(params[:inbox_id]).channel
+        channel.is_a?(Channel::Whatsapp) && channel.provider == 'whatsapp_cloud'
       end
 
       def base_scope

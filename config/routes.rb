@@ -177,6 +177,14 @@ Rails.application.routes.draw do
       # Dedicated, account-scoped message templates CRUD (global + channel-bound).
       # Channel-bound ops pass inbox_id; Meta sync stays on the inbox routes. (EVO-1716)
       resources :message_templates, only: [:index, :show, :create, :update, :destroy], controller: 'message_templates'
+      resources :whatsapp_template_definitions, only: [:index, :create, :update], controller: 'whatsapp_template_definitions' do
+        collection do
+          get :targets
+        end
+        member do
+          post :publish
+        end
+      end
 
       resources :facebook_comment_moderations, only: [:index, :show], controller: 'facebook_comment_moderations' do
         member do

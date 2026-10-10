@@ -206,6 +206,7 @@ class MessageTemplate < ApplicationRecord
       'status' => settings.is_a?(Hash) ? settings['status'] : nil,
       'approval_status' => approval_status,
       'external_template_id' => external_template_id,
+      'parameter_format' => metadata.is_a?(Hash) ? metadata['parameter_format'] : nil,
       'settings' => settings,
       'components' => components,
       'variables' => variables,

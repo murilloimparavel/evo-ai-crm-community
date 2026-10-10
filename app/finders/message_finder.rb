@@ -17,12 +17,24 @@ class MessageFinder
     # Paginação baseada em after/before
     if @params[:after].present?
       after_message = Message.find_by(id: @params[:after])
-      query = query.where('created_at > ?', after_message.created_at) if after_message
+      if after_message
+        query = query.where(
+          'created_at > :created_at OR (created_at = :created_at AND id > :id)',
+          created_at: after_message.created_at,
+          id: after_message.id
+        )
+      end
     end
 
     if @params[:before].present?
       before_message = Message.find_by(id: @params[:before])
-      query = query.where('created_at < ?', before_message.created_at) if before_message
+      if before_message
+        query = query.where(
+          'created_at < :created_at OR (created_at = :created_at AND id < :id)',
+          created_at: before_message.created_at,
+          id: before_message.id
+        )
+      end
     end
 
     # Aplicar paginação orientada por cursor:
@@ -32,13 +44,13 @@ class MessageFinder
     limit = limit_for_params
     messages =
       if @params[:before].present? && @params[:after].blank?
-        query.reorder(created_at: :desc).limit(limit).to_a.reverse
+        query.reorder(created_at: :desc, id: :desc).limit(limit).to_a.reverse
       elsif @params[:after].present? && @params[:before].blank?
-        query.reorder(created_at: :asc).limit(limit).to_a
+        query.reorder(created_at: :asc, id: :asc).limit(limit).to_a
       elsif @params[:before].blank? && @params[:after].blank?
-        query.reorder(created_at: :desc).limit(limit).to_a.reverse
+        query.reorder(created_at: :desc, id: :desc).limit(limit).to_a.reverse
       else
-        query.reorder(created_at: :asc).limit(limit).to_a
+        query.reorder(created_at: :asc, id: :asc).limit(limit).to_a
       end
 
     # Carregar attachments se não foram incluídos

@@ -235,6 +235,8 @@ class Whatsapp::IncomingMessageBaseService
   def create_message(message)
     message_type = payload_value(message, :type)
     content_attributes = {}
+    external_created_at = message_created_at(message)
+    content_attributes[:external_created_at] = external_created_at.iso8601 if external_created_at
     @in_reply_to_external_id = nil
     if message_type == 'reaction'
       content_attributes[:is_reaction] = true
@@ -254,9 +256,23 @@ class Whatsapp::IncomingMessageBaseService
       sender: @contact,
       source_id: payload_value(message, :id).to_s,
       in_reply_to_external_id: @in_reply_to_external_id,
-      content_attributes: content_attributes
+      content_attributes: content_attributes,
+      created_at: external_created_at
     )
     @message.content = media_download_failure_content(message_type) if %w[image audio video document sticker].include?(message_type) && @message.content.blank?
+  end
+
+  # Meta's WhatsApp Cloud webhook sends the original creation time as a Unix
+  # timestamp (seconds). Persist it as the message time so late webhook delivery
+  # does not reorder the conversation by arrival time.
+  def message_created_at(message)
+    timestamp = payload_value(message, :timestamp)
+    return if timestamp.blank?
+    return unless timestamp.to_s.match?(/\A\d+\z/)
+
+    Time.zone.at(Integer(timestamp.to_s, 10))
+  rescue ArgumentError, TypeError, RangeError
+    nil
   end
 
   def media_download_failure_content(type)

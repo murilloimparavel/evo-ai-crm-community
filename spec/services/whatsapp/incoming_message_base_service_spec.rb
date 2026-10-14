@@ -81,6 +81,38 @@ RSpec.describe Whatsapp::IncomingMessageBaseService do
     end
   end
 
+  describe '#message_created_at' do
+    it 'parses Meta webhook Unix timestamps in seconds' do
+      timestamp = 1_791_990_312
+
+      expect(service.send(:message_created_at, { timestamp: timestamp })).to eq(Time.zone.at(timestamp))
+    end
+
+    it 'returns nil when the webhook omits or has an invalid timestamp' do
+      expect(service.send(:message_created_at, {})).to be_nil
+      expect(service.send(:message_created_at, { timestamp: 'not-a-timestamp' })).to be_nil
+    end
+  end
+
+  describe '#create_message' do
+    it 'persists the provider timestamp as created_at and external_created_at' do
+      timestamp = 1_791_990_312
+      created_at = Time.zone.at(timestamp)
+      messages = double('conversation messages')
+      allow(service).to receive(:message_content).and_return('Mensagem de teste')
+      service.instance_variable_set(:@conversation, double(messages: messages))
+      service.instance_variable_set(:@contact, double('contact'))
+      service.instance_variable_set(:@inbox, double(id: 42))
+
+      expect(messages).to receive(:build).with(hash_including(
+        created_at: created_at,
+        content_attributes: { external_created_at: created_at.iso8601 }
+      ))
+
+      service.send(:create_message, { id: 'wamid.test', type: 'text', timestamp: timestamp })
+    end
+  end
+
   # AC9 / L-6: exercise the REAL funnel via WhatsApp Cloud — proves that a
   # duplicate `delivered` webhook (Meta retries are common) does NOT re-emit
   # the Wisper event a second time, which would otherwise flow through the

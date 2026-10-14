@@ -270,7 +270,7 @@ class Whatsapp::IncomingMessageBaseService
     return if timestamp.blank?
     return unless timestamp.to_s.match?(/\A\d+\z/)
 
-    Time.zone.at(Integer(timestamp, 10))
+    Time.zone.at(Integer(timestamp.to_s, 10))
   rescue ArgumentError, TypeError, RangeError
     nil
   end

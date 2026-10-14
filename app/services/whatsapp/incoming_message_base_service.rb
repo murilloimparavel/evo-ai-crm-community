@@ -207,14 +207,33 @@ class Whatsapp::IncomingMessageBaseService
   end
 
   def create_message(message)
+    external_created_at = message_created_at(message)
+    content_attributes = {}
+    content_attributes[:external_created_at] = external_created_at.iso8601 if external_created_at
+
     @message = @conversation.messages.build(
       content: message_content(message),
       inbox_id: @inbox.id,
       message_type: :incoming,
       sender: @contact,
       source_id: message[:id].to_s,
-      in_reply_to_external_id: @in_reply_to_external_id
+      in_reply_to_external_id: @in_reply_to_external_id,
+      content_attributes: content_attributes,
+      created_at: external_created_at
     )
+  end
+
+  # Meta's WhatsApp Cloud webhook sends the original creation time as a Unix
+  # timestamp (seconds). Persist it as the message time so late webhook delivery
+  # does not reorder the conversation by arrival time.
+  def message_created_at(message)
+    timestamp = payload_value(message, :timestamp)
+    return if timestamp.blank?
+    return unless timestamp.to_s.match?(/\A\d+\z/)
+
+    Time.zone.at(Integer(timestamp, 10))
+  rescue ArgumentError, TypeError, RangeError
+    nil
   end
 
   def attach_contact(contact)

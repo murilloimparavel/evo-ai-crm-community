@@ -126,7 +126,9 @@ class Api::V1::Conversations::MessagesController < Api::V1::Conversations::BaseC
     @message = message
 
     claimed = @message.with_lock do
+      managed_stays_message = @conversation.custom_attributes&.dig('stays_bridge_managed') == true
       next false unless @message.outgoing? && !@message.private? && @message.failed? && @message.source_id.blank?
+      next false if managed_stays_message
 
       attrs = @message.content_attributes || {}
       @message.update!(

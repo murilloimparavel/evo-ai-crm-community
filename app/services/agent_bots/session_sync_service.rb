@@ -101,12 +101,21 @@ module AgentBots
 
       session_id = build_session_id
 
-      # Determine author and role based on message type
-      author = message.incoming? ? 'user' : 'assistant'
+      # Preserve human agent messages as distinct historical context. ADK still
+      # treats them as model-role turns, while the prefix makes their source clear.
+      human_agent_reply = !message.incoming? && message.sender_type == 'User'
+      author = if message.incoming?
+                 'user'
+               elsif human_agent_reply
+                 'human_agent'
+               else
+                 'assistant'
+               end
       role = message.incoming? ? 'user' : 'model'
 
       # Extract message content
       content = extract_message_content(message)
+      content = "[Mensagem do atendente humano] #{content}" if human_agent_reply
 
       Rails.logger.info "[SessionSync] Adding event to session #{session_id} for message #{message.id}"
 
@@ -122,7 +131,8 @@ module AgentBots
             content: content,
             role: role,
             timestamp: message.created_at.to_f,
-            user_id: contact_id
+            user_id: contact_id,
+            invocation_id: "crm-message-#{message.id}"
           }
         )
 
@@ -211,8 +221,8 @@ module AgentBots
       uri = URI(url)
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == 'https'
-      http.read_timeout = 30
-      http.open_timeout = 10
+      http.read_timeout = timeout_setting('EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS', 5, max: 30)
+      http.open_timeout = timeout_setting('EVO_AI_PROCESSOR_OPEN_TIMEOUT_SECONDS', 2, max: 10)
 
       request = case method
                 when :get
@@ -235,6 +245,13 @@ module AgentBots
       Rails.logger.debug "[SessionSync] Response body: #{response.body}" if response.body.present?
 
       response
+    end
+
+    def timeout_setting(name, default, max:)
+      value = Integer(ENV.fetch(name, default.to_s), 10)
+      [[value, 1].max, max].min
+    rescue ArgumentError, TypeError
+      default
     end
 
     def build_session_metadata

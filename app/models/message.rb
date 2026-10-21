@@ -361,15 +361,16 @@ class Message < ApplicationRecord
 
     # Check if message was processed by the agent using agent_bot_inbox configuration
     agent_bot_inbox = conversation.inbox.agent_bot_inbox
-    if agent_bot_inbox&.should_process_conversation?(conversation)
+    if agent_bot_inbox&.should_process_conversation?(conversation) && sender_type != 'User'
       # Message will be processed by agent and already saved in AI processor
-      # Don't sync to avoid duplicates
+      # Don't sync bot-processed messages to avoid duplicates. Human agent replies
+      # still need to enter the processor session even while the bot is eligible.
       return
     end
 
     # Message was NOT processed by agent (conversation being handled by human, etc.)
-    # Sync it for historical purposes (both incoming and outgoing/human messages)
-    AgentBots::SessionSyncService.add_event_for_message(self)
+    # Queue it for historical purposes (both incoming and outgoing/human messages).
+    AgentBots::SessionSyncJob.perform_async(id)
   end
 
   def update_waiting_since

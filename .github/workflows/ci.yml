@@ -1,0 +1,145 @@
+name: CRM CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: '23 7 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crm-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RAILS_ENV: test
+  ENCRYPTION_KEY: test-encryption-key-for-fernet!!
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USERNAME: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DATABASE: evolution_test
+
+jobs:
+  ruby-quality:
+    name: Ruby lint and security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Run RuboCop
+        run: bundle exec rubocop --format progress
+
+      - name: Run Brakeman
+        run: bundle exec brakeman --no-pager --quiet --exit-on-warn
+
+  rspec:
+    name: Rails regression specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: evolution_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Prepare test database
+        run: bundle exec rails db:schema:load
+
+      - name: Run full RSpec suite
+        run: bundle exec rspec --format progress --format RspecJunitFormatter --out tmp/rspec.xml
+
+      - name: Upload RSpec report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rspec-report-${{ github.run_id }}
+          path: tmp/rspec.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  docker-build:
+    name: Build production Docker image (no push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Build image without publishing
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          push: false
+          build-args: |
+            RAILS_ENV=production
+            BUNDLE_WITHOUT=development:test
+            RAILS_SERVE_STATIC_FILES=true
+            GIT_SHA=${{ github.sha }}
+          tags: local/evo-ai-crm-community:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  pr-gate:
+    name: CRM required checks
+    if: always()
+    needs: [ruby-quality, rspec, docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all CI jobs to pass
+        env:
+          QUALITY_RESULT: ${{ needs.ruby-quality.result }}
+          RSPEC_RESULT: ${{ needs.rspec.result }}
+          DOCKER_RESULT: ${{ needs.docker-build.result }}
+        run: |
+          set -euo pipefail
+          for result in "$QUALITY_RESULT" "$RSPEC_RESULT" "$DOCKER_RESULT"; do
+            if [[ "$result" != success ]]; then
+              echo "::error::A required CRM CI job did not succeed: $result"
+              exit 1
+            fi
+          done
+          echo "All CRM CI checks passed."

@@ -1,0 +1,75 @@
+name: session-history-sync
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'app/jobs/agent_bots/session_sync_job.rb'
+      - 'app/models/message.rb'
+      - 'app/services/agent_bots/session_sync_*.rb'
+      - 'spec/jobs/agent_bots/session_sync_job_spec.rb'
+      - 'spec/services/agent_bots/session_sync_*_spec.rb'
+      - '.github/workflows/session-history-sync.yml'
+
+permissions:
+  contents: read
+
+env:
+  RAILS_ENV: test
+  ENCRYPTION_KEY: test-encryption-key-for-fernet!!
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USERNAME: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DATABASE: evolution_test
+
+jobs:
+  session-history-sync:
+    name: Session history sync specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: evolution_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Prepare test database
+        run: bundle exec rails db:schema:load
+
+      - name: Run session history synchronization specs
+        run: >-
+          bundle exec rspec
+          spec/jobs/agent_bots/session_sync_job_spec.rb
+          spec/models/message_spec.rb
+          spec/services/agent_bots/session_sync_rate_limiter_spec.rb
+          spec/services/agent_bots/session_sync_service_spec.rb
+          --format progress

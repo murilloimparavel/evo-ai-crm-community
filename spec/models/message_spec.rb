@@ -111,6 +111,38 @@ RSpec.describe Message do
     end
   end
 
+  describe '#sync_message_event' do
+    let(:agent_bot_inbox) { double('AgentBotInbox') }
+    let(:inbox) { double('Inbox', active_bot?: true, agent_bot_inbox: agent_bot_inbox) }
+    let(:conversation) { double('Conversation', inbox: inbox) }
+
+    it 'queues a human agent reply even while the bot can process the conversation' do
+      message = instance_double(described_class, id: 'message-1', conversation: conversation, private?: false, sender_type: 'User')
+      allow(agent_bot_inbox).to receive(:should_process_conversation?).with(conversation).and_return(true)
+
+      expect(AgentBots::SessionSyncJob).to receive(:perform_async).with(message.id)
+
+      message.send(:sync_message_event)
+    end
+
+    it 'does not enqueue messages already processed by the bot' do
+      message = instance_double(described_class, conversation: conversation, private?: false, sender_type: 'AgentBot')
+      allow(agent_bot_inbox).to receive(:should_process_conversation?).with(conversation).and_return(true)
+
+      expect(AgentBots::SessionSyncJob).not_to receive(:perform_async)
+
+      message.send(:sync_message_event)
+    end
+
+    it 'does not enqueue private notes' do
+      message = instance_double(described_class, conversation: conversation, private?: true, sender_type: 'User')
+
+      expect(AgentBots::SessionSyncJob).not_to receive(:perform_async)
+
+      message.send(:sync_message_event)
+    end
+  end
+
   describe '#set_conversation_activity' do
     it 'delegates to refresh_conversation_activity! with current time' do
       conversation = double('Conversation', last_activity_at: nil)

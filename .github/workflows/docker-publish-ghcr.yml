@@ -1,23 +1,32 @@
 name: Build and Publish GHCR Image
 
 on:
-  push:
+  workflow_run:
+    workflows: ['CRM CI']
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: crm-image-publish-main
+  cancel-in-progress: false
 
 env:
   IMAGE_NAME: ghcr.io/murilloimparavel/evo-ai-crm-community
 
 jobs:
   build-and-publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
@@ -40,9 +49,9 @@ jobs:
             RAILS_ENV=production
             BUNDLE_WITHOUT=development:test
             RAILS_SERVE_STATIC_FILES=true
-            GIT_SHA=${{ github.sha }}
+            GIT_SHA=${{ github.event.workflow_run.head_sha }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:sha-${{ github.event.workflow_run.head_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

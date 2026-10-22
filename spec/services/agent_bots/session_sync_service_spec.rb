@@ -3,7 +3,9 @@
 require 'rails_helper'
 
 RSpec.describe AgentBots::SessionSyncService do
-  let(:conversation) { double('Conversation', inbox: double('Inbox'), contact_id: 'contact-1') }
+  let(:conversation) do
+    double('Conversation', inbox: double('Inbox', agent_bot: double('AgentBot')), contact_id: 'contact-1')
+  end
   let(:service) { described_class.new(conversation) }
   let(:message) do
     double(

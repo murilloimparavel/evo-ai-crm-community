@@ -6,7 +6,7 @@ RSpec.describe AgentBots::SessionSyncJob do
   let(:message) { instance_double(Message, id: 'message-1') }
 
   it 'uses the low queue and a bounded retry count' do
-    expect(described_class.get_sidekiq_options['queue']).to eq('low')
+    expect(described_class.get_sidekiq_options['queue']).to eq(:low)
     expect(described_class.get_sidekiq_options['retry']).to eq(4)
   end
 

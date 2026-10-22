@@ -69,11 +69,11 @@ RSpec.describe AgentBots::SessionSyncService do
   end
 
   it 'uses bounded, configurable HTTP timeouts' do
-    expect(service.send(:timeout_setting, 'MISSING_TIMEOUT', 2, max: 10)).to eq(2)
+    expect(AgentBots::SessionSyncHttpClient.timeout_setting('MISSING_TIMEOUT', 2, max: 10)).to eq(2)
 
     previous = ENV.fetch('EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS', nil)
     ENV['EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS'] = '999'
-    expect(service.send(:timeout_setting, 'EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS', 5, max: 30)).to eq(30)
+    expect(AgentBots::SessionSyncHttpClient.timeout_setting('EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS', 5, max: 30)).to eq(30)
   ensure
     previous.nil? ? ENV.delete('EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS') : ENV['EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS'] = previous
   end

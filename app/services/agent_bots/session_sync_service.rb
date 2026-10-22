@@ -30,7 +30,9 @@ module AgentBots
       Rails.logger.info "[SessionSync] Creating session #{session_id} for conversation #{@conversation.id}"
 
       body = { session_id: session_id, user_id: contact_id, metadata: build_session_metadata }
-      send_sync_request(:post, "/api/v1/sessions/sync/#{agent_id}", body, 'create', session_id)
+      send_sync_request(
+        :post, "/api/v1/sessions/sync/#{agent_id}", body, { action: 'create', session_id: session_id }
+      )
     end
 
     def delete_session
@@ -44,9 +46,12 @@ module AgentBots
       Rails.logger.info "[SessionSync] Deleting session #{session_id} for conversation #{@conversation.id}"
       Rails.logger.info "[SessionSync] Agent bot ID: #{@agent_bot&.id}, API key present: #{@agent_bot&.api_key.present?}"
 
-      headers = build_headers
-      log_request_headers(headers)
-      send_sync_request(:delete, "/api/v1/sessions/sync/#{session_id}", nil, 'delete', session_id, headers: headers)
+      send_sync_request(
+        :delete,
+        "/api/v1/sessions/sync/#{session_id}",
+        nil,
+        { action: 'delete', session_id: session_id, headers: build_headers }
+      )
     end
 
     def add_message_event(message)
@@ -59,7 +64,9 @@ module AgentBots
 
       Rails.logger.info "[SessionSync] Adding event to session #{session_id} for message #{message.id}"
       body = message_event_payload(message)
-      send_sync_request(:post, "/api/v1/sessions/#{session_id}/events", body, 'event', session_id)
+      send_sync_request(
+        :post, "/api/v1/sessions/#{session_id}/events", body, { action: 'event', session_id: session_id }
+      )
     end
 
     private
@@ -99,7 +106,11 @@ module AgentBots
       'assistant'
     end
 
-    def send_sync_request(method, endpoint, body, action, session_id, headers: nil)
+    def send_sync_request(method, endpoint, body, options)
+      action = options.fetch(:action)
+      session_id = options.fetch(:session_id)
+      headers = options[:headers]
+      log_request_headers(headers) if headers
       response = make_request(method, endpoint, body, headers: headers)
       log_sync_response(response, action, session_id)
     rescue StandardError => e

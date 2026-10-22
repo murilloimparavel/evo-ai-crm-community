@@ -27,7 +27,10 @@ RSpec.describe AgentBots::SessionSyncService do
   it 'sends human agent messages with distinct authorship and a stable idempotency key' do
     response = instance_double(Net::HTTPResponse, code: '201')
     request = nil
-    allow(service).to receive(:make_request) { |*args| request = args; response }
+    allow(service).to receive(:make_request) do |*args|
+      request = args
+      response
+    end
 
     expect(service.add_message_event(message)).to be(true)
     expect(request).to include(:post, '/api/v1/sessions/session-1/events')
@@ -50,7 +53,10 @@ RSpec.describe AgentBots::SessionSyncService do
     )
     response = instance_double(Net::HTTPResponse, code: '201')
     request = nil
-    allow(service).to receive(:make_request) { |*args| request = args; response }
+    allow(service).to receive(:make_request) do |*args|
+      request = args
+      response
+    end
 
     expect(service.add_message_event(incoming)).to be(true)
     expect(request).to include(:post, '/api/v1/sessions/session-1/events')

@@ -9,7 +9,7 @@ RSpec.describe AgentBots::SessionSyncRateLimiter do
     redis = instance_double(Redis, eval: 0.0)
     allow(Sidekiq).to receive(:redis).and_yield(redis)
 
-    expect(redis).to receive(:eval) do |_script, keys: _keys, argv:|
+    expect(redis).to receive(:eval) do |_script, argv:, keys:|
       expect(keys).to eq([described_class::REDIS_KEY])
       expect(argv[1]).to eq(0.5)
       expect(argv[2]).to eq(5)
@@ -27,7 +27,7 @@ RSpec.describe AgentBots::SessionSyncRateLimiter do
     ENV['SESSION_SYNC_RATE_LIMIT_PER_MINUTE'] = '9999'
     redis = instance_double(Redis)
     allow(Sidekiq).to receive(:redis).and_yield(redis)
-    expect(redis).to receive(:eval) do |_script, keys: _keys, argv:|
+    expect(redis).to receive(:eval) do |_script, argv:|
       expect(argv[1]).to eq(10.0)
       expect(argv[2]).to eq(5)
       expect(argv[3]).to eq(61)

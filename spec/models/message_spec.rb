@@ -7,8 +7,7 @@ RSpec.describe Message do
 
   describe '#refresh_conversation_activity!' do
     it 'uses current time when requested even if created_at is older' do
-      conversation = instance_double(Conversation, id: 'conv_1')
-      allow(conversation).to receive(:class).and_return(Conversation)
+      conversation = Conversation.new(id: 'conv_1')
       relation = instance_double(ActiveRecord::Relation)
       message = described_class.new(created_at: 2.days.ago)
       allow(message).to receive(:conversation).and_return(conversation)
@@ -30,8 +29,7 @@ RSpec.describe Message do
 
     it 'uses only provided timestamp when use_current_time is false' do
       older_time = Time.zone.parse('2026-02-10 10:00:00')
-      conversation = instance_double(Conversation, id: 'conv_2')
-      allow(conversation).to receive(:class).and_return(Conversation)
+      conversation = Conversation.new(id: 'conv_2')
       relation = instance_double(ActiveRecord::Relation)
       message = described_class.new(created_at: older_time)
       allow(message).to receive(:conversation).and_return(conversation)

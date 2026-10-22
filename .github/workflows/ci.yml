@@ -147,6 +147,8 @@ jobs:
           baseline_dir="$RUNNER_TEMP/crm-rspec-base"
           base_report="$RUNNER_TEMP/rspec-base.xml"
           head_report="$RUNNER_TEMP/rspec-head.xml"
+          export BUNDLE_GEMFILE="$GITHUB_WORKSPACE/Gemfile"
+          export BUNDLE_PATH="$GITHUB_WORKSPACE/vendor/bundle"
 
           run_suite() {
             local ref="$1"

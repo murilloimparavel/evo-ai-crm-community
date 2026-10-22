@@ -25,7 +25,7 @@ module AgentBots
 
     def self.acquire_delay
       per_minute = Integer(ENV.fetch('SESSION_SYNC_RATE_LIMIT_PER_MINUTE', '30'), 10)
-      per_minute = [[per_minute, 1].max, 600].min
+      per_minute = per_minute.clamp(1, 600)
       refill_per_second = per_minute / 60.0
       capacity = [per_minute, 5].min
       ttl = (capacity / refill_per_second).ceil + 60

@@ -360,8 +360,7 @@ class Message < ApplicationRecord
     return if private? # Skip private messages (internal notes)
 
     # Check if message was processed by the agent using agent_bot_inbox configuration
-    agent_bot_inbox = conversation.inbox.agent_bot_inbox
-    if agent_bot_inbox&.should_process_conversation?(conversation) && sender_type != 'User'
+    if agent_bot_processes_message?
       # Message will be processed by agent and already saved in AI processor
       # Don't sync bot-processed messages to avoid duplicates. Human agent replies
       # still need to enter the processor session even while the bot is eligible.
@@ -371,6 +370,11 @@ class Message < ApplicationRecord
     # Message was NOT processed by agent (conversation being handled by human, etc.)
     # Queue it for historical purposes (both incoming and outgoing/human messages).
     AgentBots::SessionSyncJob.perform_async(id)
+  end
+
+  def agent_bot_processes_message?
+    agent_bot_inbox = conversation.inbox.agent_bot_inbox
+    agent_bot_inbox&.should_process_conversation?(conversation) && sender_type != 'User'
   end
 
   def update_waiting_since
@@ -419,11 +423,14 @@ class Message < ApplicationRecord
   end
 
   def reopen_conversation
-    return if conversation.muted?
-    return unless incoming?
+    return if conversation.muted? || !incoming?
 
     conversation.open! if conversation.snoozed?
+    reopen_pending_conversation
+    reopen_resolved_conversation if conversation.resolved?
+  end
 
+  def reopen_pending_conversation
     # CRITICAL: Bot conversations MUST stay pending
     # - Bot only processes messages when conversation status is 'pending'
     # - Conversation should only change to 'open' when:
@@ -434,17 +441,18 @@ class Message < ApplicationRecord
       # If there's an active bot, keep conversation pending
       # Only change to open if there's NO active bot
       has_active_bot = conversation.inbox.active_bot?
-      Rails.logger.info "[Message] reopen_conversation - conversation.pending?: true, inbox.active_bot?: #{has_active_bot}, inbox_id: #{conversation.inbox_id}"
+      Rails.logger.info do
+        "[Message] reopen_conversation - conversation.pending?: true, inbox.active_bot?: #{has_active_bot}, " \
+          "inbox_id: #{conversation.inbox_id}"
+      end
 
-      unless has_active_bot
+      if has_active_bot
+        Rails.logger.info "[Message] reopen_conversation - Keeping conversation #{conversation.id} as pending (active bot present)"
+      else
         Rails.logger.info "[Message] reopen_conversation - Changing conversation #{conversation.id} from pending to open (no active bot)"
         conversation.open!
-      else
-        Rails.logger.info "[Message] reopen_conversation - Keeping conversation #{conversation.id} as pending (active bot present)"
       end
     end
-
-    reopen_resolved_conversation if conversation.resolved?
   end
 
   def reopen_resolved_conversation
@@ -526,11 +534,12 @@ class Message < ApplicationRecord
   def publish_message_updated
     return unless saved_changes.any?
 
-    publish(:message_updated, data: {
+    payload = {
       message: self,
       changed_attributes: previous_changes,
       api_access_token: Current.api_access_token
-    })
+    }
+    publish(:message_updated, data: payload)
   end
 
   def publish_message_deleted
@@ -557,10 +566,9 @@ class Message < ApplicationRecord
     return if key.blank?
 
     ::Redis::Alfred.incr(key)
-  rescue => e
+  rescue StandardError => e
     Rails.logger.error "Failed to increment message counter for message #{id}: #{e.message}"
   end
-
 end
 
 Message.prepend_mod_with('Message')

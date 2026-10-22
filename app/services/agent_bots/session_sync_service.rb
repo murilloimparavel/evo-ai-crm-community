@@ -29,32 +29,8 @@ module AgentBots
 
       Rails.logger.info "[SessionSync] Creating session #{session_id} for conversation #{@conversation.id}"
 
-      # Build metadata with contact data
-      metadata = build_session_metadata
-
-      begin
-        response = make_request(
-          :post,
-          "/api/v1/sessions/sync/#{agent_id}",
-          {
-            session_id: session_id,
-            user_id: contact_id,
-            metadata: metadata
-          }
-        )
-
-        if response&.code == '201' || response&.code == '200'
-          Rails.logger.info "[SessionSync] ✅ Session #{session_id} created successfully"
-          true
-        else
-          Rails.logger.error "[SessionSync] ❌ Failed to create session: #{response&.code} #{response&.body}"
-          false
-        end
-      rescue StandardError => e
-        Rails.logger.error "[SessionSync] ❌ Error creating session: #{e.message}"
-        Rails.logger.error e.backtrace.first(10).join("\n")
-        false
-      end
+      body = { session_id: session_id, user_id: contact_id, metadata: build_session_metadata }
+      send_sync_request(:post, "/api/v1/sessions/sync/#{agent_id}", body, 'create', session_id)
     end
 
     def delete_session
@@ -68,29 +44,9 @@ module AgentBots
       Rails.logger.info "[SessionSync] Deleting session #{session_id} for conversation #{@conversation.id}"
       Rails.logger.info "[SessionSync] Agent bot ID: #{@agent_bot&.id}, API key present: #{@agent_bot&.api_key.present?}"
 
-      begin
-        headers = build_headers
-        Rails.logger.debug "[SessionSync] Request headers: #{headers.except('X-API-Key').merge('X-API-Key' => '[REDACTED]')}"
-
-        response = make_request(
-          :delete,
-          "/api/v1/sessions/sync/#{session_id}",
-          nil,
-          headers: headers
-        )
-
-        if response&.code == '204' || response&.code == '200'
-          Rails.logger.info "[SessionSync] ✅ Session #{session_id} deleted successfully"
-          true
-        else
-          Rails.logger.error "[SessionSync] ❌ Failed to delete session: #{response&.code} #{response&.body}"
-          false
-        end
-      rescue StandardError => e
-        Rails.logger.error "[SessionSync] ❌ Error deleting session: #{e.message}"
-        Rails.logger.error e.backtrace.first(10).join("\n")
-        false
-      end
+      headers = build_headers
+      log_request_headers(headers)
+      send_sync_request(:delete, "/api/v1/sessions/sync/#{session_id}", nil, 'delete', session_id, headers: headers)
     end
 
     def add_message_event(message)
@@ -101,53 +57,9 @@ module AgentBots
 
       session_id = build_session_id
 
-      # Preserve human agent messages as distinct historical context. ADK still
-      # treats them as model-role turns, while the prefix makes their source clear.
-      human_agent_reply = !message.incoming? && message.sender_type == 'User'
-      author = if message.incoming?
-                 'user'
-               elsif human_agent_reply
-                 'human_agent'
-               else
-                 'assistant'
-               end
-      role = message.incoming? ? 'user' : 'model'
-
-      # Extract message content
-      content = extract_message_content(message)
-      content = "[Mensagem do atendente humano] #{content}" if human_agent_reply
-
       Rails.logger.info "[SessionSync] Adding event to session #{session_id} for message #{message.id}"
-
-      # Get contact_id for user_id
-      contact_id = @conversation.contact_id.to_s
-
-      begin
-        response = make_request(
-          :post,
-          "/api/v1/sessions/#{session_id}/events",
-          {
-            author: author,
-            content: content,
-            role: role,
-            timestamp: message.created_at.to_f,
-            user_id: contact_id,
-            invocation_id: "crm-message-#{message.id}"
-          }
-        )
-
-        if response&.code == '201' || response&.code == '200'
-          Rails.logger.info "[SessionSync] ✅ Event added to session #{session_id} successfully"
-          true
-        else
-          Rails.logger.error "[SessionSync] ❌ Failed to add event: #{response&.code} #{response&.body}"
-          false
-        end
-      rescue StandardError => e
-        Rails.logger.error "[SessionSync] ❌ Error adding event: #{e.message}"
-        Rails.logger.error e.backtrace.first(10).join("\n")
-        false
-      end
+      body = message_event_payload(message)
+      send_sync_request(:post, "/api/v1/sessions/#{session_id}/events", body, 'event', session_id)
     end
 
     private
@@ -155,37 +67,70 @@ module AgentBots
     def should_sync?
       return false unless @inbox&.active_bot?
       return false unless @agent_bot
-      return false unless extract_agent_id.present?
-      return false unless @conversation.contact_id.present?
+      return false if extract_agent_id.blank?
+      return false if @conversation.contact_id.blank?
 
       true
     end
 
     def extract_agent_id
-      # Try to get agent_id from bot_config first (for future compatibility)
-      if @agent_bot.bot_config.is_a?(Hash) && @agent_bot.bot_config['agent_id'].present?
-        return @agent_bot.bot_config['agent_id'].to_s
+      AgentBots::SessionSyncAgentResolver.new(@agent_bot).call
+    end
+
+    def message_event_payload(message)
+      human_agent_reply = !message.incoming? && message.sender_type == 'User'
+      content = extract_message_content(message)
+      content = "[Mensagem do atendente humano] #{content}" if human_agent_reply
+
+      {
+        author: message_author(message, human_agent_reply),
+        content: content,
+        role: message.incoming? ? 'user' : 'model',
+        timestamp: message.created_at.to_f,
+        user_id: @conversation.contact_id.to_s,
+        invocation_id: "crm-message-#{message.id}"
+      }
+    end
+
+    def message_author(message, human_agent_reply)
+      return 'user' if message.incoming?
+      return 'human_agent' if human_agent_reply
+
+      'assistant'
+    end
+
+    def send_sync_request(method, endpoint, body, action, session_id, headers: nil)
+      response = make_request(method, endpoint, body, headers: headers)
+      log_sync_response(response, action, session_id)
+    rescue StandardError => e
+      Rails.logger.error "[SessionSync] ❌ Error #{action}: #{e.message}"
+      Rails.logger.error e.backtrace.first(10).join("\n")
+      false
+    end
+
+    def log_sync_response(response, action, session_id)
+      return log_sync_success(action, session_id) if successful_response?(response, action)
+
+      Rails.logger.error "[SessionSync] ❌ Failed to #{action}: #{response&.code} #{response&.body}"
+      false
+    end
+
+    def successful_response?(response, action)
+      return false unless response
+
+      accepted_codes = action == 'delete' ? %w[200 204] : %w[200 201]
+      accepted_codes.include?(response.code)
+    end
+
+    def log_sync_success(action, session_id)
+      Rails.logger.info "[SessionSync] ✅ #{action.capitalize} completed for session #{session_id}"
+      true
+    end
+
+    def log_request_headers(headers)
+      Rails.logger.debug do
+        "[SessionSync] Request headers: #{headers.except('X-API-Key').merge('X-API-Key' => '[REDACTED]')}"
       end
-
-      # Extract agent_id from outgoing_url
-      # Format: http://host/api/v1/a2a/{agent_id}
-      outgoing_url = @agent_bot.outgoing_url
-      return nil unless outgoing_url.present?
-
-      # Match pattern: /api/v1/a2a/{agent_id}
-      match = outgoing_url.match(%r{/api/v1/a2a/([^/?]+)})
-      return match[1] if match
-
-      # Fallback: try to extract from end of URL path
-      uri = URI.parse(outgoing_url) rescue nil
-      return nil unless uri
-
-      path_segments = uri.path.split('/').reject(&:empty?)
-      # Find the index of 'a2a' and get the next segment
-      a2a_index = path_segments.index('a2a')
-      return path_segments[a2a_index + 1] if a2a_index && path_segments[a2a_index + 1]
-
-      nil
     end
 
     def build_session_id
@@ -194,6 +139,7 @@ module AgentBots
       # This matches the format used in a2a_routes.py: f"{external_id}_{agent_id}"
       agent_id = extract_agent_id
       return nil unless agent_id
+
       "#{@conversation.id}_#{agent_id}"
     end
 
@@ -212,44 +158,40 @@ module AgentBots
 
     def make_request(method, endpoint, body = nil, headers: nil)
       base_url = ENV.fetch('EVO_AI_PROCESSOR_URL', 'http://localhost:8000')
-      url = "#{base_url}#{endpoint}"
-
       request_headers = headers || build_headers
+      uri = URI("#{base_url}#{endpoint}")
+      Rails.logger.debug { "[SessionSync] Making #{method.to_s.upcase} request to #{uri}" }
+      response = configure_http_client(uri).request(build_http_request(method, uri, request_headers, body))
+      log_http_response(response)
+      response
+    end
 
-      Rails.logger.debug "[SessionSync] Making #{method.to_s.upcase} request to #{url}"
+    def log_http_response(response)
+      Rails.logger.debug { "[SessionSync] Response: #{response.code} #{response.message}" }
+      Rails.logger.debug { "[SessionSync] Response body: #{response.body}" } if response.body.present?
+    end
 
-      uri = URI(url)
+    def configure_http_client(uri)
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == 'https'
       http.read_timeout = timeout_setting('EVO_AI_PROCESSOR_READ_TIMEOUT_SECONDS', 5, max: 30)
       http.open_timeout = timeout_setting('EVO_AI_PROCESSOR_OPEN_TIMEOUT_SECONDS', 2, max: 10)
+      http
+    end
 
-      request = case method
-                when :get
-                  Net::HTTP::Get.new(uri.path, request_headers)
-                when :post
-                  Net::HTTP::Post.new(uri.path, request_headers)
-                when :delete
-                  Net::HTTP::Delete.new(uri.path, request_headers)
-                else
-                  raise ArgumentError, "Unsupported HTTP method: #{method}"
-                end
+    def build_http_request(method, uri, headers, body)
+      request_class = { get: Net::HTTP::Get, post: Net::HTTP::Post, delete: Net::HTTP::Delete }[method]
+      raise ArgumentError, "Unsupported HTTP method: #{method}" unless request_class
 
+      request = request_class.new(uri.path, headers)
       request.body = body.to_json if body
-
-      Rails.logger.debug "[SessionSync] Request body: #{body.to_json}" if body
-
-      response = http.request(request)
-
-      Rails.logger.debug "[SessionSync] Response: #{response.code} #{response.message}"
-      Rails.logger.debug "[SessionSync] Response body: #{response.body}" if response.body.present?
-
-      response
+      Rails.logger.debug { "[SessionSync] Request body: #{body.to_json}" } if body
+      request
     end
 
     def timeout_setting(name, default, max:)
       value = Integer(ENV.fetch(name, default.to_s), 10)
-      [[value, 1].max, max].min
+      value.clamp(1, max)
     rescue ArgumentError, TypeError
       default
     end
@@ -270,52 +212,8 @@ module AgentBots
         contactId: contact.id.to_s,
         contactName: contact.name,
         inboxId: @inbox.id.to_s,
-        contact: build_contact_data(contact)
+        contact: AgentBots::SessionSyncContactPayload.new(contact).build
       }
-    end
-
-    def build_contact_data(contact)
-      {
-        id: contact.id.to_s,
-        name: contact.name,
-        email: contact.email,
-        phone_number: contact.phone_number,
-        identifier: contact.identifier,
-        type: contact.type,
-        contact_type: contact.contact_type,
-        blocked: contact.blocked,
-        location: contact.location,
-        country_code: contact.country_code,
-        industry: contact.industry,
-        website: contact.website,
-        tax_id: contact.tax_id,
-        last_activity_at: contact.last_activity_at&.iso8601,
-        created_at: contact.created_at&.iso8601,
-        updated_at: contact.updated_at&.iso8601,
-        additional_attributes: contact.additional_attributes || {},
-        custom_attributes: contact.custom_attributes || {},
-        labels: contact.labels.pluck(:name),
-        companies: contact.companies.map { |c| { id: c.id.to_s, name: c.name } },
-        pipelines: build_pipeline_data(contact)
-      }
-    end
-
-    def build_pipeline_data(contact)
-      contact.pipeline_items.includes(:pipeline, :pipeline_stage, :tasks).map do |item|
-        {
-          id: item.id.to_s,
-          pipeline_id: item.pipeline_id.to_s,
-          pipeline_name: item.pipeline&.name,
-          stage_id: item.pipeline_stage_id.to_s,
-          stage_name: item.pipeline_stage&.name,
-          stage_position: item.pipeline_stage&.position,
-          status: item.completed? ? 'completed' : 'pending',
-          entered_at: item.entered_at&.iso8601,
-          completed_at: item.completed_at&.iso8601,
-          custom_fields: item.custom_fields || {},
-          tasks: item.tasks.map { |task| { id: task.id.to_s, title: task.title, status: task.status } }
-        }
-      end
     end
 
     def build_headers

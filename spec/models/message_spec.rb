@@ -9,7 +9,7 @@ RSpec.describe Message do
     it 'uses current time when requested even if created_at is older' do
       conversation = Conversation.new(id: SecureRandom.uuid)
       relation = instance_double(ActiveRecord::Relation)
-      message = described_class.new(created_at: 2.days.ago)
+      message = described_class.new(created_at: Time.zone.parse('2026-02-10 10:00:00'))
       allow(message).to receive(:conversation).and_return(conversation)
 
       travel_to(Time.zone.parse('2026-02-12 10:00:00')) do

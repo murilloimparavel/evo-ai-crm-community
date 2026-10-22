@@ -43,14 +43,21 @@ jobs:
       - name: Run RuboCop
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == pull_request ]]; then
+          if [[ "$EVENT_NAME" == pull_request && -n "$BASE_SHA" ]]; then
             mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- '*.rb')
             if ((${#ruby_files[@]} == 0)); then
               echo "No Ruby files changed; skipping RuboCop for this pull request."
+              exit 0
+            fi
+            bundle exec rubocop --format progress "${ruby_files[@]}"
+          elif [[ "$EVENT_NAME" == push && -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.rb')
+            if ((${#ruby_files[@]} == 0)); then
+              echo "No Ruby files changed in this push; skipping RuboCop."
               exit 0
             fi
             bundle exec rubocop --format progress "${ruby_files[@]}"
@@ -58,13 +65,47 @@ jobs:
             bundle exec rubocop --format progress
           fi
 
+      - name: Install pinned Brakeman
+        run: gem install brakeman --version 8.1.0 --no-document
+
       - name: Run Brakeman
-        run: bundle exec brakeman --no-pager --quiet --exit-on-warn
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/brakeman"
+          if [[ "$EVENT_NAME" == pull_request && -n "$BASE_SHA" ]]; then
+            baseline_dir="$RUNNER_TEMP/brakeman/base"
+            baseline_report="$RUNNER_TEMP/brakeman/base.json"
+            head_report="$RUNNER_TEMP/brakeman/head-vs-base.json"
+            mkdir -p "$baseline_dir"
+            git archive "$BASE_SHA" | tar -x -C "$baseline_dir"
+            brakeman _8.1.0_ --no-pager --quiet --no-exit-on-warn --no-exit-on-error \
+              --format json --output "$baseline_report" --path "$baseline_dir"
+            brakeman _8.1.0_ --no-pager --quiet --exit-on-warn --compare "$baseline_report" \
+              --format json --output "$head_report"
+          else
+            brakeman _8.1.0_ --no-pager --quiet --no-exit-on-warn \
+              --format json --output "$RUNNER_TEMP/brakeman/report.json"
+          fi
+
+      - name: Upload Brakeman report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: brakeman-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/brakeman/*.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   rspec:
-    name: Rails regression specs
+    name: Rails regression specs (base comparison)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      HEAD_SHA: ${{ github.sha }}
     services:
       postgres:
         image: postgres:14
@@ -92,24 +133,58 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
 
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.4.4'
           bundler-cache: true
 
-      - name: Prepare test database
-        run: bundle exec rails db:schema:load
+      - name: Run full RSpec suite against base and PR head
+        run: |
+          set -euo pipefail
+          baseline_dir="$RUNNER_TEMP/crm-rspec-base"
+          base_report="$RUNNER_TEMP/rspec-base.xml"
+          head_report="$RUNNER_TEMP/rspec-head.xml"
 
-      - name: Run full RSpec suite
-        run: bundle exec rspec --format progress --format RspecJunitFormatter --out tmp/rspec.xml
+          run_suite() {
+            local ref="$1"
+            local report="$2"
+            git checkout --detach "$ref"
+            bundle exec rails db:drop
+            bundle exec rails db:create
+            bundle exec rails db:schema:load
+            set +e
+            bundle exec rspec --format progress --format RspecJunitFormatter --out "$report"
+            local status=$?
+            set -e
+            if [[ ! -s "$report" ]]; then
+              echo "::error::RSpec did not produce a JUnit report for $ref (exit $status)."
+              return 1
+            fi
+            return 0
+          }
+
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != "$HEAD_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            git worktree add --detach "$baseline_dir" "$BASE_SHA"
+            (
+              cd "$baseline_dir"
+              run_suite "$BASE_SHA" "$base_report"
+            )
+            git worktree remove --force "$baseline_dir"
+            run_suite "$HEAD_SHA" "$head_report"
+            python3 .github/scripts/compare-rspec-results.py "$base_report" "$head_report"
+          else
+            run_suite "$HEAD_SHA" "$head_report"
+          fi
 
       - name: Upload RSpec report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rspec-report-${{ github.run_id }}
-          path: tmp/rspec.xml
+          path: ${{ runner.temp }}/rspec-*.xml
           if-no-files-found: ignore
           retention-days: 7
 

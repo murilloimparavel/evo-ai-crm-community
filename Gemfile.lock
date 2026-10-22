@@ -21,6 +21,7 @@ PATH
 GEM
   remote: https://rubygems.org/
   specs:
+    abbrev (0.1.2)
     actioncable (7.1.5.1)
       actionpack (= 7.1.5.1)
       activesupport (= 7.1.5.1)
@@ -976,6 +977,7 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
+  abbrev (~> 0.1.2)
   active_record_query_trace
   activerecord-import
   acts-as-taggable-on

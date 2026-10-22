@@ -229,6 +229,7 @@ group :development, :test do
   gem 'active_record_query_trace'
   ##--- gems for debugging and error reporting ---##
   # static analysis
+  gem 'abbrev', '~> 0.1.2' # Ruby 3.4 no longer bundles abbrev, which Brakeman's highline requires.
   gem 'brakeman'
   gem 'bundle-audit', require: false
   gem 'byebug', platform: :mri, require: false

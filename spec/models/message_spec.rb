@@ -7,13 +7,13 @@ RSpec.describe Message do
 
   describe '#refresh_conversation_activity!' do
     it 'uses current time when requested even if created_at is older' do
-      conversation = double('Conversation', id: 'conv_1', class: Conversation)
-      relation = double('Relation')
-      message = described_class.new(created_at: 2.days.ago)
+      conversation = Conversation.new(id: SecureRandom.uuid)
+      relation = instance_double(ActiveRecord::Relation)
+      message = described_class.new(created_at: Time.zone.parse('2026-02-10 10:00:00'))
       allow(message).to receive(:conversation).and_return(conversation)
 
       travel_to(Time.zone.parse('2026-02-12 10:00:00')) do
-        allow(Conversation).to receive(:where).with(id: 'conv_1').and_return(relation)
+        allow(Conversation).to receive(:where).with(id: conversation.id).and_return(relation)
         expect(relation).to receive(:update_all).with(
           [
             'last_activity_at = GREATEST(COALESCE(last_activity_at, ?), ?), updated_at = ?',
@@ -29,13 +29,13 @@ RSpec.describe Message do
 
     it 'uses only provided timestamp when use_current_time is false' do
       older_time = Time.zone.parse('2026-02-10 10:00:00')
-      conversation = double('Conversation', id: 'conv_2', class: Conversation)
-      relation = double('Relation')
+      conversation = Conversation.new(id: SecureRandom.uuid)
+      relation = instance_double(ActiveRecord::Relation)
       message = described_class.new(created_at: older_time)
       allow(message).to receive(:conversation).and_return(conversation)
 
       travel_to(Time.zone.parse('2026-02-12 11:00:00')) do
-        allow(Conversation).to receive(:where).with(id: 'conv_2').and_return(relation)
+        allow(Conversation).to receive(:where).with(id: conversation.id).and_return(relation)
         expect(relation).to receive(:update_all).with(
           [
             'last_activity_at = GREATEST(COALESCE(last_activity_at, ?), ?), updated_at = ?',
@@ -111,9 +111,44 @@ RSpec.describe Message do
     end
   end
 
+  describe '#sync_message_event' do
+    let(:agent_bot_inbox) { instance_double(AgentBotInbox) }
+    let(:inbox) { instance_double(Inbox, active_bot?: true, agent_bot_inbox: agent_bot_inbox) }
+    let(:conversation) { instance_double(Conversation, inbox: inbox) }
+
+    it 'queues a human agent reply even while the bot can process the conversation' do
+      message = described_class.new
+      allow(message).to receive_messages(id: 'message-1', conversation: conversation, private?: false, sender_type: 'User')
+      allow(agent_bot_inbox).to receive(:should_process_conversation?).with(conversation).and_return(true)
+
+      expect(AgentBots::SessionSyncJob).to receive(:perform_async).with(message.id)
+
+      message.send(:sync_message_event)
+    end
+
+    it 'does not enqueue messages already processed by the bot' do
+      message = described_class.new
+      allow(message).to receive_messages(conversation: conversation, private?: false, sender_type: 'AgentBot')
+      allow(agent_bot_inbox).to receive(:should_process_conversation?).with(conversation).and_return(true)
+
+      expect(AgentBots::SessionSyncJob).not_to receive(:perform_async)
+
+      message.send(:sync_message_event)
+    end
+
+    it 'does not enqueue private notes' do
+      message = described_class.new
+      allow(message).to receive_messages(conversation: conversation, private?: true, sender_type: 'User')
+
+      expect(AgentBots::SessionSyncJob).not_to receive(:perform_async)
+
+      message.send(:sync_message_event)
+    end
+  end
+
   describe '#set_conversation_activity' do
     it 'delegates to refresh_conversation_activity! with current time' do
-      conversation = double('Conversation', last_activity_at: nil)
+      conversation = instance_double(Conversation, last_activity_at: nil)
       message = described_class.new(created_at: 1.day.ago)
       allow(message).to receive(:conversation).and_return(conversation)
 

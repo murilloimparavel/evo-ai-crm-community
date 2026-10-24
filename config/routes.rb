@@ -168,6 +168,16 @@ Rails.application.routes.draw do
 
       resources :labels, only: [:index, :show, :create, :update, :destroy], controller: 'labels'
 
+      resources :knowledge_entries, only: [:index, :show, :create, :update, :destroy] do
+        get :search, on: :collection
+        post :publish, on: :member
+        post :archive, on: :member
+      end
+      resources :ai_knowledge_entries, controller: 'knowledge_entries', only: [:index, :show, :create, :update, :destroy] do
+        post :publish, on: :member
+        post :archive, on: :member
+      end
+
       resources :agent_bots, only: [:index, :create, :show, :update, :destroy], controller: 'agent_bots' do
         delete :avatar, on: :member
       end

@@ -337,8 +337,8 @@ class Whatsapp::ConversationSyncService
     message.content = media_data[:caption] if media_data[:caption].present?
   end
 
-  def handle_echo_media_error(message, echo_data, media_id, error)
-    Rails.logger.error "[WHATSAPP] Failed to attach echo media #{media_id}: #{error.message}"
+  def handle_echo_media_error(message, echo_data, _media_id, error)
+    Rails.logger.error "[WHATSAPP] Failed to attach echo media (type=#{echo_data[:type]}, error=#{error.class})"
     attach_echo_media_info_fallback(message, echo_data)
   end
 
@@ -376,9 +376,25 @@ class Whatsapp::ConversationSyncService
   end
 
   def download_echo_attachment_file(media_id)
-    # Use the same method as other WhatsApp services for downloading media
-    download_attachment_file({ id: media_id })
+    metadata_response = HTTParty.get(inbox.channel.media_url(media_id), headers: inbox.channel.api_headers)
+    raise EchoMediaDownloadError, "metadata HTTP #{metadata_response.code}" unless metadata_response.success?
+
+    metadata = metadata_response.parsed_response
+    media_url = metadata.is_a?(Hash) ? (metadata['url'] || metadata[:url]) : nil
+    raise EchoMediaDownloadError, 'media URL missing from metadata' if media_url.blank?
+
+    file = Down.download(media_url, headers: inbox.channel.api_headers)
+    # A metadata JSON body was previously stored as audio/ogg or image/jpeg.
+    # Reject it before Active Storage creates another broken attachment.
+    if file.content_type.to_s.match?(/json|html/i) || ['{', '<'].include?(file.read(1))
+      file.close!
+      raise EchoMediaDownloadError, 'media endpoint returned JSON instead of a file'
+    end
+    file.rewind
+    file
   end
+
+  class EchoMediaDownloadError < StandardError; end
 
   def attach_echo_location(message, echo_data)
     location = echo_data[:location] || {}

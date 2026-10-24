@@ -337,7 +337,7 @@ class Whatsapp::ConversationSyncService
     message.content = media_data[:caption] if media_data[:caption].present?
   end
 
-  def handle_echo_media_error(message, echo_data, media_id, error)
+  def handle_echo_media_error(message, echo_data, _media_id, error)
     Rails.logger.error "[WHATSAPP] Failed to attach echo media (type=#{echo_data[:type]}, error=#{error.class})"
     attach_echo_media_info_fallback(message, echo_data)
   end

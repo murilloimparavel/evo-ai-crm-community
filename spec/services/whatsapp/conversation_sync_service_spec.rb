@@ -1,5 +1,8 @@
 require 'rails_helper'
 
+# HTTParty responses and downloaded temporary files expose dynamic interfaces.
+# rubocop:disable RSpec/VerifiedDoubles
+
 RSpec.describe Whatsapp::ConversationSyncService do
   let(:channel) { double('channel', media_url: 'https://graph.facebook.com/media-id', api_headers: { 'Authorization' => 'Bearer token' }) }
   let(:inbox) { double('inbox', channel: channel) }
@@ -30,3 +33,4 @@ RSpec.describe Whatsapp::ConversationSyncService do
     end
   end
 end
+# rubocop:enable RSpec/VerifiedDoubles

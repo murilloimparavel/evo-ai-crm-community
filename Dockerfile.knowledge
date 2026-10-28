@@ -5,3 +5,4 @@ COPY app/services/whatsapp/conversation_sync_service.rb /app/app/services/whatsa
 COPY config/routes.rb /app/config/routes.rb
 COPY db/migrate/20261024120000_create_knowledge_entries.rb /app/db/migrate/20261024120000_create_knowledge_entries.rb
 COPY app/services/whatsapp/providers/base_service.rb /app/app/services/whatsapp/providers/base_service.rb
+COPY app/services/bot_runtime/delegation_service.rb /app/app/services/bot_runtime/delegation_service.rb

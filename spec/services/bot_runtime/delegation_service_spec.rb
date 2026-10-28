@@ -196,6 +196,7 @@ RSpec.describe BotRuntime::DelegationService do
     end
   end
   describe 'delivery snapshot' do
+
     it 'includes only confirmed public outgoing messages from this conversation' do
       delivered = instance_double(Message, id: 'sent-1', content: 'Opção já enviada')
       expect(messages_relation).to receive(:where).with(message_type: :outgoing, private: false).and_return(messages_relation)
@@ -206,5 +207,4 @@ RSpec.describe BotRuntime::DelegationService do
       expect(snapshot[:messages]).to eq([{ id: 'sent-1', content: 'Opção já enviada' }])
     end
   end
-
 end

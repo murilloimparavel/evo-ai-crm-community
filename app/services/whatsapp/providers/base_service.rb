@@ -147,6 +147,8 @@ class Whatsapp::Providers::BaseService
     result.gsub!(%r{<strike[^>]*>(.*?)</strike>}im, '~\1~')
     result.gsub!(%r{<del[^>]*>(.*?)</del>}im, '~\1~')
     result = ActionController::Base.helpers.strip_tags(result)
+    # Sanitization serializes HTML entities; WhatsApp expects plain text.
+    result = CGI.unescapeHTML(result)
     result.gsub!(/[ \t]+/, ' ')
     result.gsub!(/\n{3,}/, "\n\n")
     result.strip

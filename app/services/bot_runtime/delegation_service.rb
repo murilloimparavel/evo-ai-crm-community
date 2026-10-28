@@ -130,11 +130,26 @@ module BotRuntime
           contact: { id: contact.id, name: contact.name }
         },
         agent_bot_id: @agent_bot.id,
+        crm_delivery_context: build_delivery_context,
         agent_bot_name: @agent_bot.name,
         contactId: contact.id,
         contactName: contact.name,
         inboxId: @conversation.inbox.id,
         contact: build_contact_data(contact)
+      }
+    end
+
+    # Only CRM-persisted outbound messages can support claims of prior delivery.
+    # Failed/pending sends and private notes must never be treated as delivered.
+    def build_delivery_context
+      messages = @conversation.messages.where(message_type: :outgoing, private: false)
+                              .where(status: %i[sent delivered read])
+                              .order(created_at: :desc).limit(10)
+      {
+        version: 1,
+        conversation_id: @conversation.id.to_s,
+        captured_at: Time.current.iso8601,
+        messages: messages.reverse.map { |message| { id: message.id.to_s, content: message.content.to_s.first(8000) } }
       }
     end
 

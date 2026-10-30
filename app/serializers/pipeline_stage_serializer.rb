@@ -26,6 +26,7 @@ module PipelineStageSerializer
       color: pipeline_stage.color,
       stage_type: pipeline_stage.stage_type,
       automation_rules: pipeline_stage.automation_rules || {},
+      classification_profile: pipeline_stage.classification_profile || {},
       custom_fields: pipeline_stage.custom_fields || {},
       created_at: pipeline_stage.created_at&.iso8601,
       updated_at: pipeline_stage.updated_at&.iso8601

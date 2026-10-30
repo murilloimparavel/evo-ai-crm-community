@@ -41,6 +41,17 @@ agent_bots_inactivity_check_scheduler_job:
   description: 'Check inactive conversations and process inactivity actions'
 
 # executed At every minute to fire stage-level inactivity automation rules
+pipeline_classification_scheduler_job:
+  cron: '* * * * *'
+  class: 'PipelineClassification::SchedulerJob'
+  queue: low
+
+modular_followup_scheduler_job:
+  cron: '* * * * *'
+  class: 'Followups::SchedulerJob'
+  queue: scheduled_jobs
+  description: 'Recover due stage classifications and authorized follow-ups; unconfigured policies stay OFF'
+
 pipelines_stage_inactivity_check_scheduler_job:
   cron: '* * * * *'
   class: 'Pipelines::StageInactivityCheckSchedulerJob'

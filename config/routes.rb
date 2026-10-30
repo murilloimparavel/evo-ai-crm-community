@@ -606,7 +606,16 @@ Rails.application.routes.draw do
 
       post 'pipeline_tasks/for_conversation', to: 'pipeline_tasks#for_conversation'
 
+      resources :followup_evidences, only: [:create] do
+        collection { get :preview }
+      end
+
       resources :pipelines, controller: 'pipelines' do
+        resource :classification_catalog, only: [:show, :update], controller: 'pipeline_classification_catalogs' do
+          post :preview
+          post :publish
+          get :projection
+        end
         collection do
           get :stats
           get 'by_conversation/:conversation_id', action: :by_conversation, as: :by_conversation

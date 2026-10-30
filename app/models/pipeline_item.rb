@@ -31,6 +31,20 @@
 #  fk_rails_...  (pipeline_stage_id => pipeline_stages.id)
 #
 class PipelineItem < ApplicationRecord
+  after_create :invalidate_followup_stage_work
+  after_update :invalidate_followup_stage_work
+  after_destroy :cancel_followup_stage_work
+  after_create_commit -> { PipelineClassification::ModelHooks.pipeline_item_changed(self) }
+  after_update_commit -> { PipelineClassification::ModelHooks.pipeline_item_changed(self) }
+  after_destroy_commit -> { PipelineClassification::ModelHooks.pipeline_item_changed(self) }
+
+  def invalidate_followup_stage_work
+    Followups::Lifecycle.pipeline_item_updated(self)
+  end
+
+  def cancel_followup_stage_work
+    Followups::Lifecycle.pipeline_item_destroyed(self)
+  end
   include Wisper::Publisher
 
   belongs_to :pipeline

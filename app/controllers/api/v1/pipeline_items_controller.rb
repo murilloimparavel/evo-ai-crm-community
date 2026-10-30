@@ -4,6 +4,8 @@
 class Api::V1::PipelineItemsController < Api::V1::BaseController
   include Events::Types
 
+  rescue_from Pipelines::ItemIdentityResolver::AmbiguousIdentity, with: :reject_ambiguous_identity
+
   # Mutating actions authorize against the pipeline write policy; reads stay at
   # view level.
   # Card writes an AGENT may run — gated on the dedicated pipeline_items.update key
@@ -56,10 +58,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     contact = nil
 
     if params[:type] == 'conversation'
-      # Try to find by id (UUID) first, then by display_id (integer)
-      # This ensures we match UUIDs correctly
-      conversation = Conversation.find_by(id: params[:item_id]) ||
-                    Conversation.find_by(display_id: params[:item_id])
+      conversation = identity_resolver.conversation(params[:item_id])
 
       if conversation.nil?
         error_response(
@@ -157,7 +156,9 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       dispatch_conversation_updated_event(@pipeline_item.conversation) if @pipeline_item.conversation
 
       success_response(
-        data: PipelineItemSerializer.serialize(@pipeline_item, include_entity: true),
+        data: PipelineItemSerializer.serialize(@pipeline_item, include_entity: true).merge(
+          conversation_display_id: @pipeline_item.conversation&.display_id
+        ),
         message: 'Pipeline item created successfully',
         status: :created
       )
@@ -374,7 +375,9 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       dispatch_conversation_updated_event(@pipeline_item.conversation)
 
       success_response(
-        data: { pipeline_item: @pipeline_item.push_event_data },
+        data: { pipeline_item: @pipeline_item.push_event_data.merge(
+          conversation_display_id: @pipeline_item.conversation&.display_id
+        ) },
         message: 'Item moved successfully'
       )
     else
@@ -447,8 +450,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     stage = @pipeline.pipeline_stages.find_by(id: params[:pipeline_stage_id])
     return skip_missing_target_stage if stage.nil?
 
-    conversation = Conversation.find_by(id: params[:conversation_id]) ||
-                   Conversation.find_by(display_id: params[:conversation_id])
+    conversation = identity_resolver.conversation(params[:conversation_id])
     return error_response(ApiErrorCodes::CONVERSATION_NOT_FOUND, 'Conversation not found') if conversation.nil?
 
     movement_type, success = relocate_conversation(conversation, stage)
@@ -464,7 +466,9 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     dispatch_conversation_updated_event(conversation)
 
     success_response(
-      data: { moved: true, movement_type: movement_type, pipeline_id: @pipeline.id, stage_id: stage.id },
+      data: { moved: true, movement_type: movement_type, conversation_id: conversation.id,
+              conversation_display_id: conversation.display_id,
+              pipeline_id: @pipeline.id, stage_id: stage.id },
       message: 'Conversation moved successfully'
     )
   end
@@ -543,6 +547,18 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
 
   private
 
+  def identity_resolver
+    @identity_resolver ||= Pipelines::ItemIdentityResolver.new(@pipeline)
+  end
+
+  def reject_ambiguous_identity
+    error_response(
+      ApiErrorCodes::BUSINESS_RULE_VIOLATION,
+      'Ambiguous pipeline item identity; use an unambiguous card UUID',
+      status: :unprocessable_entity
+    )
+  end
+
   def skip_missing_target_stage
     Rails.logger.warn(
       "PipelineItems#move_conversation: stage #{params[:pipeline_stage_id].inspect} " \
@@ -556,8 +572,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
 
   def relocate_conversation(conversation, stage)
     service = Pipelines::ConversationService.new(pipeline: @pipeline, user: Current.user)
-    current_item = conversation.pipeline_items.active.find_by(pipeline_id: @pipeline.id) ||
-                   conversation.pipeline_items.active.first
+    current_item = identity_resolver.current_item(conversation)
 
     if current_item.nil?
       ['assigned', service.add_conversation(conversation, stage: stage)]
@@ -628,46 +643,20 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     )
   end
 
-  # rubocop:disable Metrics/AbcSize
   def set_pipeline_item
-    # For destroy and move_to_stage actions, try to find by conversation_id first, then by pipeline_item id
-    if %w[destroy move_to_stage update_conversation].include?(action_name)
-      # First try to find by conversation display_id
-      conversation = Conversation.find_by(display_id: params[:id])
-      @pipeline_item = @pipeline.pipeline_items.find_by(conversation: conversation) if conversation
+    @pipeline_item = identity_resolver.item(
+      params[:id],
+      allow_conversation: %w[destroy move_to_stage update_conversation].include?(action_name)
+    )
+    return if @pipeline_item
 
-      # If not found, try by conversation id (UUID)
-      if @pipeline_item.nil?
-        conversation = Conversation.find_by(id: params[:id])
-        @pipeline_item = @pipeline.pipeline_items.find_by(conversation: conversation) if conversation
-      end
-
-      # If still not found, try by pipeline_item id as final fallback
-      @pipeline_item = @pipeline.pipeline_items.find_by(id: params[:id]) if @pipeline_item.nil?
-
-      if @pipeline_item.nil?
-        error_response(
-          ApiErrorCodes::RESOURCE_NOT_FOUND,
-          "Pipeline conversation #{params[:id]} not found in pipeline #{@pipeline.name}",
-          status: :not_found
-        )
-        return
-      end
-    else
-      # For other actions (update), find by pipeline_item id only
-      @pipeline_item = @pipeline.pipeline_items.find_by(id: params[:id])
-
-      if @pipeline_item.nil?
-        error_response(
-          ApiErrorCodes::RESOURCE_NOT_FOUND,
-          "Pipeline conversation #{params[:id]} not found in pipeline #{@pipeline.name}",
-          status: :not_found
-        )
-        return
-      end
-    end
+    error_response(
+      ApiErrorCodes::RESOURCE_NOT_FOUND,
+      'Pipeline item not found',
+      details: { reason: 'pipeline_item_not_found' },
+      status: :not_found
+    )
   end
-  # rubocop:enable Metrics/AbcSize
 
   def pipeline_item_params
     params.require(:pipeline_item).permit(custom_fields: {})

@@ -26,6 +26,8 @@ class Pipeline < ApplicationRecord
   VALID_TYPES = %w[sales support onboarding custom marketing].freeze
 
   belongs_to :created_by, class_name: 'User'
+  has_many :pipeline_classification_catalogs
+  after_update :invalidate_classification_catalog, if: -> { saved_change_to_config? || saved_change_to_is_active? }
 
   has_many :pipeline_stages, -> { order(:position) }, dependent: :destroy, inverse_of: :pipeline
   has_many :pipeline_items, dependent: :destroy
@@ -59,6 +61,10 @@ class Pipeline < ApplicationRecord
   before_save :ensure_single_default_per_account, if: :is_default?
   after_update :cleanup_removed_attributes_from_items
   after_save :drop_team_links_unless_team_visible
+
+  def invalidate_classification_catalog
+    PipelineClassification::Lifecycle.pipeline_changed!(pipeline: self)
+  end
 
   def add_conversation(conversation, stage = nil, user = nil)
     stage ||= pipeline_stages.first

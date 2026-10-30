@@ -136,6 +136,8 @@ class Conversation < ApplicationRecord
   before_create :ensure_waiting_since
 
   after_update_commit :execute_after_update_commit_callbacks
+  after_update :invalidate_followup_work
+  after_update_commit -> { PipelineClassification::ModelHooks.conversation_updated(self) }
   after_create_commit :notify_conversation_creation, unless: :imported?
   after_create_commit :load_attributes_created_by_db_triggers
   after_create_commit :publish_conversation_created, unless: :imported?
@@ -144,6 +146,10 @@ class Conversation < ApplicationRecord
   after_update_commit :publish_conversation_resolved
   after_destroy_commit :publish_conversation_deleted
   after_destroy_commit :sync_session_delete
+
+  def invalidate_followup_work
+    Followups::Lifecycle.conversation_updated(self)
+  end
 
   def auto_resolve_after
     nil

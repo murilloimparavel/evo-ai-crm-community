@@ -21,6 +21,10 @@
 #
 class PipelineStage < ApplicationRecord
   belongs_to :pipeline
+  around_save :lock_classification_aggregate
+  around_destroy :lock_classification_aggregate
+  after_save :invalidate_classification_catalog, if: -> { saved_change_to_name? || saved_change_to_classification_profile? }
+  after_destroy :invalidate_classification_catalog
   has_many :pipeline_items, dependent: :destroy
   has_many :conversations, through: :pipeline_items
   has_many :stage_movements_from, class_name: 'StageMovement', foreign_key: 'from_stage_id', dependent: :destroy, inverse_of: :from_stage
@@ -42,6 +46,14 @@ class PipelineStage < ApplicationRecord
   before_validation :set_default_custom_fields
   after_update :cleanup_removed_attributes_from_items
   before_destroy :reassign_conversations_to_first_stage
+
+  def lock_classification_aggregate(&block)
+    pipeline.with_lock(&block)
+  end
+
+  def invalidate_classification_catalog
+    PipelineClassification::Lifecycle.pipeline_changed!(pipeline: pipeline)
+  end
 
   def item_count
     pipeline_items.count

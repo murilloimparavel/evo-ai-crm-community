@@ -1,8 +1,14 @@
-FROM ghcr.io/murilloimparavel/evo-ai-crm-community@sha256:074e6fc605fddc59cbf403d4fecc0f500be29f0eb998234e01c12e34984a33eb
-COPY app/controllers/api/v1/knowledge_entries_controller.rb /app/app/controllers/api/v1/knowledge_entries_controller.rb
-COPY app/models/knowledge_entry.rb /app/app/models/knowledge_entry.rb
-COPY app/services/whatsapp/conversation_sync_service.rb /app/app/services/whatsapp/conversation_sync_service.rb
-COPY config/routes.rb /app/config/routes.rb
-COPY db/migrate/20261024120000_create_knowledge_entries.rb /app/db/migrate/20261024120000_create_knowledge_entries.rb
-COPY app/services/whatsapp/providers/base_service.rb /app/app/services/whatsapp/providers/base_service.rb
-COPY app/services/bot_runtime/delegation_service.rb /app/app/services/bot_runtime/delegation_service.rb
+# Preserve the verified production runtime/dependencies. The source checkout must
+# contain production 135c333 plus the reviewed additive classification changes.
+FROM ghcr.io/murilloimparavel/crcn-knowledge-crm@sha256:4d8eedeb278694e7bcd8bcc18ddc5ee31dc00db023d8d9f4f54b80737811a9df
+
+# Copy the complete application namespaces so new models, services, jobs, routes,
+# cron definitions and migrations cannot be omitted by an outdated file list.
+# Secrets stay in runtime environment; .dockerignore excludes .env files.
+COPY app/ /app/app/
+COPY config/ /app/config/
+COPY lib/ /app/lib/
+COPY db/ /app/db/
+
+ARG GIT_SHA
+RUN test -n "$GIT_SHA" && printf '%s\n' "$GIT_SHA" > /app/.git_sha

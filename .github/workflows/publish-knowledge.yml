@@ -23,4 +23,6 @@ jobs:
           context: .
           file: Dockerfile.knowledge
           push: true
+          build-args: |
+            GIT_SHA=${{ github.event.pull_request.head.sha }}
           tags: ghcr.io/murilloimparavel/crcn-knowledge-crm:sha-${{ github.event.pull_request.head.sha }}

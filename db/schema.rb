@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
+ActiveRecord::Schema[7.1].define(version: 2026_10_29_127000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -613,6 +613,171 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
     t.index ["status"], name: "index_facebook_comment_moderations_on_status"
   end
 
+  create_table "followup_anchor_evidences", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "followup_campaign_id", null: false
+    t.uuid "conversation_id"
+    t.uuid "pipeline_item_id"
+    t.uuid "source_incoming_message_id"
+    t.uuid "anchor_message_id"
+    t.uuid "verified_by_id"
+    t.string "evidence_method", default: "operator_verified", null: false
+    t.string "anchor_digest", null: false
+    t.datetime "verified_at", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["anchor_message_id"], name: "index_followup_anchor_evidences_on_anchor_message_id"
+    t.index ["conversation_id"], name: "index_followup_anchor_evidences_on_conversation_id"
+    t.index ["followup_campaign_id", "conversation_id", "source_incoming_message_id", "anchor_message_id"], name: "idx_followup_evidence_identity", unique: true
+    t.index ["followup_campaign_id"], name: "index_followup_anchor_evidences_on_followup_campaign_id"
+    t.index ["pipeline_item_id"], name: "index_followup_anchor_evidences_on_pipeline_item_id"
+    t.index ["source_incoming_message_id"], name: "index_followup_anchor_evidences_on_source_incoming_message_id"
+    t.index ["verified_by_id"], name: "index_followup_anchor_evidences_on_verified_by_id"
+  end
+
+  create_table "followup_budget_days", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "scope_key", null: false
+    t.date "budget_date", null: false
+    t.string "timezone", null: false
+    t.decimal "reserved_usd", precision: 18, scale: 10, default: "0.0", null: false
+    t.decimal "spent_usd", precision: 18, scale: 10, default: "0.0", null: false
+    t.integer "conversation_count", default: 0, null: false
+    t.jsonb "conversation_ids", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["scope_key", "budget_date"], name: "index_followup_budget_days_on_scope_key_and_budget_date", unique: true
+  end
+
+  create_table "followup_budget_reservations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "followup_budget_day_id", null: false
+    t.string "subject_type", null: false
+    t.uuid "subject_id", null: false
+    t.integer "attempt_number", null: false
+    t.decimal "reserved_usd", precision: 18, scale: 10, null: false
+    t.decimal "actual_usd", precision: 18, scale: 10
+    t.bigint "input_tokens"
+    t.string "status", default: "reserved", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["followup_budget_day_id"], name: "index_followup_budget_reservations_on_followup_budget_day_id"
+    t.index ["subject_type", "subject_id", "attempt_number"], name: "idx_followup_budget_attempt", unique: true
+  end
+
+  create_table "followup_campaigns", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_stage_id"
+    t.uuid "inbox_id"
+    t.string "campaign_key", null: false
+    t.string "engine", default: "jev_v1", null: false
+    t.string "policy_version", null: false
+    t.boolean "enabled", default: false, null: false
+    t.string "mode", default: "off", null: false
+    t.datetime "active_from"
+    t.datetime "expires_at"
+    t.jsonb "policy", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_key"], name: "index_followup_campaigns_on_campaign_key", unique: true
+    t.index ["inbox_id"], name: "index_followup_campaigns_on_inbox_id"
+    t.index ["pipeline_stage_id", "inbox_id"], name: "idx_followup_campaign_enabled_target", unique: true, where: "(enabled = true)"
+    t.index ["pipeline_stage_id"], name: "index_followup_campaigns_on_pipeline_stage_id"
+  end
+
+  create_table "followup_classifications", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "followup_campaign_id", null: false
+    t.uuid "conversation_id"
+    t.uuid "source_incoming_message_id"
+    t.bigint "generation", null: false
+    t.bigint "revision", null: false
+    t.string "policy_version", null: false
+    t.string "model", null: false
+    t.string "question_version", null: false
+    t.string "status", default: "reserved", null: false
+    t.string "snapshot_hash"
+    t.jsonb "decision", default: {}, null: false
+    t.string "reason"
+    t.integer "attempt_count", default: 0, null: false
+    t.bigint "fence_token", default: 0, null: false
+    t.datetime "lease_expires_at"
+    t.datetime "expires_at"
+    t.datetime "next_attempt_at"
+    t.bigint "input_tokens"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id"], name: "index_followup_classifications_on_conversation_id"
+    t.index ["followup_campaign_id", "conversation_id", "generation", "policy_version", "model", "question_version"], name: "idx_followup_classification_cycle", unique: true
+    t.index ["followup_campaign_id"], name: "index_followup_classifications_on_followup_campaign_id"
+    t.index ["status", "next_attempt_at"], name: "idx_followup_classification_retry"
+  end
+
+  create_table "followup_conversation_states", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "conversation_id", null: false
+    t.bigint "revision", default: 0, null: false
+    t.bigint "classification_generation", default: 0, null: false
+    t.uuid "latest_incoming_message_id"
+    t.datetime "classification_due_at"
+    t.datetime "cooldown_until"
+    t.uuid "active_execution_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["classification_due_at"], name: "index_followup_conversation_states_on_classification_due_at"
+    t.index ["conversation_id"], name: "index_followup_conversation_states_on_conversation_id", unique: true
+  end
+
+  create_table "followup_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "followup_campaign_id", null: false
+    t.uuid "conversation_id"
+    t.uuid "pipeline_item_id"
+    t.uuid "followup_anchor_evidence_id", null: false
+    t.uuid "source_incoming_message_id"
+    t.uuid "quote_anchor_message_id"
+    t.string "step_id", null: false
+    t.string "policy_version", null: false
+    t.string "status", default: "reserved", null: false
+    t.string "snapshot_hash"
+    t.string "model"
+    t.string "question_version"
+    t.string "decision"
+    t.string "reason"
+    t.uuid "template_id"
+    t.datetime "due_at", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "next_attempt_at"
+    t.datetime "lease_expires_at"
+    t.bigint "fence_token", default: 0, null: false
+    t.bigint "authorized_revision"
+    t.integer "attempt_count", default: 0, null: false
+    t.bigint "input_tokens"
+    t.uuid "message_id"
+    t.string "external_provider_id"
+    t.datetime "finalized_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.uuid "pipeline_classification_result_id"
+    t.string "classification_catalog_hash"
+    t.index ["conversation_id"], name: "index_followup_executions_on_conversation_id"
+    t.index ["followup_anchor_evidence_id"], name: "index_followup_executions_on_followup_anchor_evidence_id"
+    t.index ["followup_campaign_id", "conversation_id", "source_incoming_message_id", "step_id"], name: "idx_followup_execution_cycle_step", unique: true
+    t.index ["followup_campaign_id"], name: "index_followup_executions_on_followup_campaign_id"
+    t.index ["message_id"], name: "index_followup_executions_on_message_id", unique: true
+    t.index ["pipeline_classification_result_id"], name: "index_followup_execution_pipeline_classification"
+    t.index ["pipeline_item_id"], name: "index_followup_executions_on_pipeline_item_id"
+    t.index ["status", "due_at"], name: "idx_followup_execution_due"
+  end
+
+  create_table "followup_templates", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "template_key", null: false
+    t.string "version", null: false
+    t.text "body", null: false
+    t.string "body_digest"
+    t.uuid "approved_by_id"
+    t.datetime "approved_at"
+    t.boolean "active", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approved_by_id"], name: "index_followup_templates_on_approved_by_id"
+    t.index ["template_key", "version"], name: "index_followup_templates_on_template_key_and_version", unique: true
+  end
+
   create_table "inactivity_action_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "conversation_id", null: false
     t.uuid "agent_bot_id", null: false
@@ -691,6 +856,25 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.jsonb "settings", default: {}
+  end
+
+  create_table "knowledge_entries", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "title", null: false
+    t.text "body", null: false
+    t.string "content_type", null: false
+    t.string "source"
+    t.text "tags", default: [], null: false, array: true
+    t.string "status", default: "draft", null: false
+    t.string "account_scope", null: false
+    t.uuid "created_by_id"
+    t.uuid "updated_by_id"
+    t.datetime "published_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "to_tsvector('portuguese'::regconfig, (((COALESCE(title, ''::character varying))::text || ' '::text) || COALESCE(body, ''::text)))", name: "index_knowledge_entries_on_portuguese_text", using: :gin
+    t.index ["account_scope"], name: "index_knowledge_entries_on_account_scope"
+    t.index ["status"], name: "index_knowledge_entries_on_status"
+    t.index ["tags"], name: "index_knowledge_entries_on_tags", using: :gin
   end
 
   create_table "labels", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -789,11 +973,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
     t.float "sentiment_score", default: 0.0
     t.integer "sentiment", default: 0, null: false
     t.integer "source", default: 0, null: false
+    t.uuid "followup_execution_id"
     t.index ["content"], name: "index_messages_on_content", opclass: :gin_trgm_ops, using: :gin
     t.index ["conversation_id", "created_at"], name: "idx_messages_conv_created_desc", order: { created_at: :desc }
     t.index ["conversation_id", "created_at"], name: "idx_messages_conv_created_incoming_desc", order: { created_at: :desc }, where: "(message_type = 0)"
     t.index ["conversation_id"], name: "index_messages_on_conversation_id"
     t.index ["created_at"], name: "index_messages_on_created_at"
+    t.index ["followup_execution_id"], name: "index_messages_on_followup_execution_id", unique: true
     t.index ["inbox_id", "content_type", "created_at"], name: "index_messages_for_type_date_inbox"
     t.index ["inbox_id"], name: "index_messages_on_inbox_id"
     t.index ["sender_type", "sender_id"], name: "index_messages_on_sender_type_and_sender_id"
@@ -891,6 +1077,76 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
     t.index ["uid"], name: "index_oauth_applications_on_uid", unique: true
   end
 
+  create_table "pipeline_classification_catalogs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_id", null: false
+    t.bigint "catalog_version", null: false
+    t.string "catalog_hash", null: false
+    t.jsonb "snapshot", null: false
+    t.uuid "approved_by_id"
+    t.datetime "approved_at", null: false
+    t.datetime "created_at", null: false
+    t.index ["approved_by_id"], name: "index_pipeline_classification_catalogs_on_approved_by_id"
+    t.index ["pipeline_id", "catalog_version"], name: "idx_pipeline_catalog_revision", unique: true
+    t.index ["pipeline_id"], name: "index_pipeline_classification_catalogs_on_pipeline_id"
+  end
+
+  create_table "pipeline_classification_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_id", null: false
+    t.uuid "conversation_id", null: false
+    t.uuid "message_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "accepted_generation", default: 0, null: false
+    t.index ["conversation_id"], name: "index_pipeline_classification_events_on_conversation_id"
+    t.index ["pipeline_id", "conversation_id", "message_id"], name: "idx_pipeline_incoming_receipt", unique: true
+    t.index ["pipeline_id"], name: "index_pipeline_classification_events_on_pipeline_id"
+  end
+
+  create_table "pipeline_classification_results", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_id"
+    t.uuid "conversation_id"
+    t.uuid "pipeline_classification_catalog_id"
+    t.uuid "source_incoming_message_id"
+    t.uuid "recommended_stage_id"
+    t.bigint "generation", null: false
+    t.bigint "revision", null: false
+    t.string "catalog_hash", null: false
+    t.string "model", null: false
+    t.string "question_version", null: false
+    t.string "status", default: "reserved", null: false
+    t.string "snapshot_hash"
+    t.string "reason"
+    t.jsonb "decision", default: {}, null: false
+    t.integer "attempt_count", default: 0, null: false
+    t.bigint "fence_token", default: 0, null: false
+    t.datetime "lease_expires_at"
+    t.datetime "expires_at"
+    t.datetime "next_attempt_at"
+    t.bigint "input_tokens"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id"], name: "index_pipeline_classification_results_on_conversation_id"
+    t.index ["pipeline_classification_catalog_id"], name: "idx_pipeline_result_catalog"
+    t.index ["pipeline_id", "conversation_id", "generation", "catalog_hash", "model", "question_version"], name: "idx_pipeline_classification_cycle", unique: true
+    t.index ["pipeline_id"], name: "index_pipeline_classification_results_on_pipeline_id"
+    t.index ["status", "next_attempt_at"], name: "idx_pipeline_classification_retry"
+  end
+
+  create_table "pipeline_classification_states", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_id", null: false
+    t.uuid "conversation_id", null: false
+    t.bigint "generation", default: 0, null: false
+    t.bigint "revision", default: 0, null: false
+    t.uuid "source_incoming_message_id"
+    t.datetime "due_at"
+    t.string "context_digest"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id"], name: "index_pipeline_classification_states_on_conversation_id"
+    t.index ["due_at"], name: "index_pipeline_classification_states_on_due_at"
+    t.index ["pipeline_id", "conversation_id"], name: "idx_pipeline_classification_state_identity", unique: true
+    t.index ["pipeline_id"], name: "index_pipeline_classification_states_on_pipeline_id"
+  end
+
   create_table "pipeline_item_products", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "pipeline_item_id", null: false
     t.uuid "product_id", null: false
@@ -957,6 +1213,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.jsonb "custom_fields", default: {}, null: false
+    t.jsonb "classification_profile", default: {}, null: false
     t.index ["custom_fields"], name: "index_pipeline_stages_on_custom_fields", using: :gin
     t.index ["pipeline_id", "position"], name: "index_pipeline_stages_on_pipeline_id_and_position", unique: true
     t.index ["pipeline_id"], name: "index_pipeline_stages_on_pipeline_id"
@@ -1430,11 +1687,43 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_09_120000) do
   add_foreign_key "data_privacy_consents", "users"
   add_foreign_key "facebook_comment_moderations", "conversations"
   add_foreign_key "facebook_comment_moderations", "messages"
+  add_foreign_key "followup_anchor_evidences", "conversations", on_delete: :nullify
+  add_foreign_key "followup_anchor_evidences", "followup_campaigns"
+  add_foreign_key "followup_anchor_evidences", "messages", column: "anchor_message_id", on_delete: :nullify
+  add_foreign_key "followup_anchor_evidences", "messages", column: "source_incoming_message_id", on_delete: :nullify
+  add_foreign_key "followup_anchor_evidences", "pipeline_items", on_delete: :nullify
+  add_foreign_key "followup_anchor_evidences", "users", column: "verified_by_id", on_delete: :nullify
+  add_foreign_key "followup_budget_reservations", "followup_budget_days"
+  add_foreign_key "followup_campaigns", "inboxes", on_delete: :nullify
+  add_foreign_key "followup_campaigns", "pipeline_stages", on_delete: :nullify
+  add_foreign_key "followup_classifications", "conversations", on_delete: :nullify
+  add_foreign_key "followup_classifications", "followup_campaigns"
+  add_foreign_key "followup_classifications", "messages", column: "source_incoming_message_id", on_delete: :nullify
+  add_foreign_key "followup_conversation_states", "conversations", on_delete: :cascade
+  add_foreign_key "followup_executions", "conversations", on_delete: :nullify
+  add_foreign_key "followup_executions", "followup_anchor_evidences"
+  add_foreign_key "followup_executions", "followup_campaigns"
+  add_foreign_key "followup_executions", "messages", column: "quote_anchor_message_id", on_delete: :nullify
+  add_foreign_key "followup_executions", "messages", column: "source_incoming_message_id", on_delete: :nullify
+  add_foreign_key "followup_executions", "messages", on_delete: :nullify
+  add_foreign_key "followup_executions", "pipeline_classification_results", on_delete: :nullify
+  add_foreign_key "followup_executions", "pipeline_items", on_delete: :nullify
+  add_foreign_key "followup_templates", "users", column: "approved_by_id", on_delete: :nullify
   add_foreign_key "macro_executions", "conversations"
   add_foreign_key "macro_executions", "macros"
   add_foreign_key "macro_executions", "users"
+  add_foreign_key "messages", "followup_executions"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
+  add_foreign_key "pipeline_classification_catalogs", "pipelines", on_delete: :cascade
+  add_foreign_key "pipeline_classification_catalogs", "users", column: "approved_by_id", on_delete: :nullify
+  add_foreign_key "pipeline_classification_events", "conversations", on_delete: :cascade
+  add_foreign_key "pipeline_classification_events", "pipelines", on_delete: :cascade
+  add_foreign_key "pipeline_classification_results", "conversations", on_delete: :nullify
+  add_foreign_key "pipeline_classification_results", "pipeline_classification_catalogs", on_delete: :nullify
+  add_foreign_key "pipeline_classification_results", "pipelines", on_delete: :nullify
+  add_foreign_key "pipeline_classification_states", "conversations", on_delete: :cascade
+  add_foreign_key "pipeline_classification_states", "pipelines", on_delete: :cascade
   add_foreign_key "pipeline_item_products", "pipeline_items", on_delete: :cascade
   add_foreign_key "pipeline_item_products", "product_variants", on_delete: :restrict
   add_foreign_key "pipeline_item_products", "products", on_delete: :restrict

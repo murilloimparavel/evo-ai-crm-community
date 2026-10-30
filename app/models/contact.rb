@@ -39,6 +39,12 @@
 #  uniq_identifier_per_account_contact                   (identifier) UNIQUE
 #
 class Contact < ApplicationRecord
+  after_update :invalidate_followup_contact_work
+  after_update_commit -> { PipelineClassification::ModelHooks.contact_updated(self) }
+
+  def invalidate_followup_contact_work
+    Followups::Lifecycle.contact_updated(self)
+  end
   include Avatarable
   include AvailabilityStatusable
   include Labelable

@@ -27,8 +27,10 @@
 #
 # Indexes
 #
-#  idx_contacts_name_type_resolved                       (name,type,id) WHERE (((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))
-#  idx_contacts_with_identity                            (id) WHERE (((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR ((identifier)::text <> ''::text))
+#  idx_contacts_name_type_resolved                       (name,type,id) WHERE (((email)::text <> ''::text) OR ((phone_number)::text <> ''::text)
+#  OR ((identifier)::text <> ''::text))
+#  idx_contacts_with_identity                            (id) WHERE (((email)::text <> ''::text) OR ((phone_number)::text <> ''::text) OR
+#  ((identifier)::text <> ''::text))
 #  index_contacts_on_blocked                             (blocked)
 #  index_contacts_on_last_activity_at                    (last_activity_at)
 #  index_contacts_on_name_email_phone_number_identifier  (name,email,phone_number,identifier) USING gin
@@ -38,7 +40,18 @@
 #  uniq_email_per_account_contact                        (email) UNIQUE
 #  uniq_identifier_per_account_contact                   (identifier) UNIQUE
 #
-class Contact < ApplicationRecord
+# Legacy model was already 370 lines in production135c333; preserve its callback/API boundary during this rollout.
+class Contact < ApplicationRecord # rubocop:disable Metrics/ClassLength
+  after_initialize :set_default_location
+  before_validation :prepare_contact_attributes, :ensure_location_present
+  before_save :ensure_location_present
+  before_save :sync_contact_attributes
+  after_update :invalidate_followup_contact_work
+  after_update_commit -> { PipelineClassification::ModelHooks.contact_updated(self) }
+
+  def invalidate_followup_contact_work
+    Followups::Lifecycle.contact_updated(self)
+  end
   include Avatarable
   include AvailabilityStatusable
   include Labelable
@@ -59,7 +72,7 @@ class Contact < ApplicationRecord
             format: { with: /\+[1-9]\d{1,14}\z/, message: I18n.t('errors.contacts.phone_number.invalid') }
   validate :validate_phone_number_uniqueness_across_variants
   validates :tax_id, allow_blank: true, uniqueness: true, length: { maximum: 14 }
-  validates :website, allow_blank: true, format: { with: URI::DEFAULT_PARSER.make_regexp(%w[http https]), message: 'must be a valid URL' }
+  validates :website, allow_blank: true, format: { with: URI::DEFAULT_PARSER.make_regexp(%w[http https]), message: 'must be a valid URL' } # rubocop:disable Rails/I18nLocaleTexts -- Preserve the existing validation API text.
   has_many :conversations, dependent: :destroy_async
   has_many :contact_inboxes, dependent: :destroy_async
   has_many :csat_survey_responses, dependent: :destroy_async
@@ -73,15 +86,11 @@ class Contact < ApplicationRecord
 
   has_many :company_contacts, class_name: 'ContactCompany', foreign_key: 'company_id', dependent: :nullify, inverse_of: :company
   has_many :comp_contacts, through: :company_contacts, source: :contact
-  after_initialize :set_default_location
-  before_validation :prepare_contact_attributes, :ensure_location_present
-  before_save :ensure_location_present
   after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline, :trigger_contact_created_automation,
                       :validate_whatsapp_presence
   # after_update_commit :dispatch_update_event # Disabled - using Wisper events instead
   after_update_commit :publish_contact_updated, :publish_custom_attribute_changes, :publish_label_changes,
                       :trigger_contact_updated_automation, :validate_whatsapp_presence
-  before_save :sync_contact_attributes
   before_destroy :ensure_pipeline_items_cleanup, :publish_contact_deleted
   after_destroy_commit :dispatch_destroy_event
 
@@ -213,7 +222,7 @@ class Contact < ApplicationRecord
     # Also include contacts that have contact_inboxes (have at least one conversation)
     # This uses LEFT JOIN for better performance
     joins(
-      "LEFT JOIN contact_inboxes ON contact_inboxes.contact_id = contacts.id"
+      'LEFT JOIN contact_inboxes ON contact_inboxes.contact_id = contacts.id'
     ).where(
       "contacts.email <> '' OR contacts.phone_number <> '' OR contacts.identifier <> '' OR contact_inboxes.id IS NOT NULL"
     )
@@ -259,7 +268,8 @@ class Contact < ApplicationRecord
     self.phone_number = phone_number_was unless phone_number.match?(/\+[1-9]\d{1,14}\z/)
   end
 
-  def validate_phone_number_uniqueness_across_variants
+  # Preserve the existing phone-variant uniqueness validation contract.
+  def validate_phone_number_uniqueness_across_variants # rubocop:disable Metrics/CyclomaticComplexity
     return if phone_number.blank?
     return unless phone_number_changed?
 
@@ -546,8 +556,9 @@ class Contact < ApplicationRecord
   def ensure_pipeline_items_cleanup
     return if pipeline_items.empty? && conversations.none? { |c| c.pipeline_items.exists? }
 
-    if pipeline_items.exists? || conversations.any? { |c| c.pipeline_items.exists? }
-      Rails.logger.warn "Contact #{id} has pipeline_items that should be cleaned up synchronously before destroy. Controller should handle this via cleanup_contact_pipeline_items."
-    end
+    return unless pipeline_items.exists? || conversations.any? { |c| c.pipeline_items.exists? }
+
+    Rails.logger.warn "Contact #{id} has pipeline_items that should be cleaned up synchronously before destroy. " \
+                      'Controller should handle this via cleanup_contact_pipeline_items.'
   end
 end

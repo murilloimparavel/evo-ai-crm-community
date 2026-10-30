@@ -168,6 +168,16 @@ Rails.application.routes.draw do
 
       resources :labels, only: [:index, :show, :create, :update, :destroy], controller: 'labels'
 
+      resources :knowledge_entries, only: [:index, :show, :create, :update, :destroy] do
+        get :search, on: :collection
+        post :publish, on: :member
+        post :archive, on: :member
+      end
+      resources :ai_knowledge_entries, controller: 'knowledge_entries', only: [:index, :show, :create, :update, :destroy] do
+        post :publish, on: :member
+        post :archive, on: :member
+      end
+
       resources :agent_bots, only: [:index, :create, :show, :update, :destroy], controller: 'agent_bots' do
         delete :avatar, on: :member
       end
@@ -267,7 +277,7 @@ Rails.application.routes.draw do
         # (create/list/update PATCH/delete/toggle-active/sessions/...). The frontend
         # journey builder hits /api/v1/journeys*; without this it gets 404/405.
         match 'journeys(/*path)', to: 'journeys#proxy',
-              via: %i[get post put patch delete], format: false
+                                  via: %i[get post put patch delete], format: false
       end
 
       resources :csat_survey_responses, only: [:index], controller: 'csat_survey_responses' do
@@ -596,7 +606,16 @@ Rails.application.routes.draw do
 
       post 'pipeline_tasks/for_conversation', to: 'pipeline_tasks#for_conversation'
 
+      resources :followup_evidences, only: [:create] do
+        collection { get :preview }
+      end
+
       resources :pipelines, controller: 'pipelines' do
+        resource :classification_catalog, only: [:show, :update], controller: 'pipeline_classification_catalogs' do
+          post :preview
+          post :publish
+          get :projection
+        end
         collection do
           get :stats
           get 'by_conversation/:conversation_id', action: :by_conversation, as: :by_conversation

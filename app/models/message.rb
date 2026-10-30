@@ -128,6 +128,7 @@ class Message < ApplicationRecord
 
   belongs_to :inbox
   belongs_to :conversation, touch: true
+  belongs_to :followup_execution, optional: true
   belongs_to :sender, polymorphic: true, optional: true
 
   # Attachments funcionam normalmente porque usam associação polimórfica
@@ -137,11 +138,23 @@ class Message < ApplicationRecord
   has_many :notifications, as: :primary_actor, dependent: :destroy_async
 
   after_create_commit :execute_after_create_commit_callbacks, unless: :imported?
+  after_create :invalidate_followup_cycle
+  after_update :invalidate_followup_content
+  after_create_commit -> { PipelineClassification::ModelHooks.message_created(self) }
+  after_update_commit -> { PipelineClassification::ModelHooks.message_updated(self) }
   after_create_commit :publish_message_created, unless: :imported?
   after_create_commit :sync_message_event, unless: :imported?
   after_update_commit :dispatch_update_event
   after_update_commit :publish_message_updated
   after_destroy_commit :publish_message_deleted
+
+  def invalidate_followup_cycle
+    Followups::Lifecycle.message_created(self)
+  end
+
+  def invalidate_followup_content
+    Followups::Lifecycle.message_updated(self)
+  end
 
   def channel_token
     @token ||= inbox.channel.try(:page_access_token)

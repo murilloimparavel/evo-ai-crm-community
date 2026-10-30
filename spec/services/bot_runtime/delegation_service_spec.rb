@@ -35,6 +35,11 @@ RSpec.describe BotRuntime::DelegationService do
   end
 
   before do
+    allow(messages_relation).to receive(:where).with(message_type: :outgoing, private: false).and_return(messages_relation)
+    allow(messages_relation).to receive(:where).with(status: %i[sent delivered read]).and_return(messages_relation)
+    allow(messages_relation).to receive(:order).with(created_at: :desc).and_return(messages_relation)
+    allow(messages_relation).to receive(:limit).with(10).and_return(messages_relation)
+    allow(messages_relation).to receive(:reverse).and_return([])
     # The service preloads the blobs (no N+1 on the delegation hot path).
     allow(messages_relation).to receive(:includes).with(described_class::ATTACHMENT_PRELOAD).and_return(messages_relation)
   end
@@ -45,7 +50,8 @@ RSpec.describe BotRuntime::DelegationService do
   def attachment(file_type:, **opts)
     url = opts.fetch(:url, 'https://crm.example.com/rails/active_storage/blobs/proxy/photo.png')
     blob = instance_double(ActiveStorage::Blob, content_type: opts.fetch(:content_type, 'image/png'))
-    file = double('ActiveStorage::Attached::One', attached?: opts.fetch(:attached, true), blob: blob)
+    # ActiveStorage delegates blob dynamically; preserve this existing reflection-tested adapter fixture.
+    file = double('ActiveStorage::Attached::One', attached?: opts.fetch(:attached, true), blob: blob) # rubocop:disable RSpec/VerifiedDoubles
     # Outbound media URL (ACTIVE_STORAGE_URL host + 15min TTL), not the permanent
     # browser-facing Attachment#download_url — the bot_runtime fetches it server-side.
     allow(BlobUrlOptions).to receive(:outbound_media_url).with(blob).and_return(url)
@@ -188,6 +194,18 @@ RSpec.describe BotRuntime::DelegationService do
       stub_persisted_with([])
 
       expect(service.send(:build_message_event)[:attachments]).to eq([])
+    end
+  end
+
+  describe 'delivery snapshot' do
+    it 'includes only confirmed public outgoing messages from this conversation' do
+      delivered = instance_double(Message, id: 'sent-1', content: 'Opção já enviada')
+      expect(messages_relation).to receive(:where).with(message_type: :outgoing, private: false).and_return(messages_relation)
+      expect(messages_relation).to receive(:where).with(status: %i[sent delivered read]).and_return(messages_relation)
+      allow(messages_relation).to receive(:reverse).and_return([delivered])
+      snapshot = described_class.new(agent_bot, message, conversation).send(:build_delivery_context)
+      expect(snapshot[:conversation_id]).to eq('conv-1')
+      expect(snapshot[:messages]).to eq([{ id: 'sent-1', content: 'Opção já enviada' }])
     end
   end
 end

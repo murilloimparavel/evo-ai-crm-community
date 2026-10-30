@@ -60,6 +60,7 @@ class Conversation < ApplicationRecord
   validates :inbox_id, presence: true
   validates :contact_id, presence: true
   before_validation :validate_additional_attributes
+  before_save :ensure_snooze_until_reset
   before_create :ensure_display_id
   validates :additional_attributes, jsonb_attributes_length: true
   validates :custom_attributes, jsonb_attributes_length: true
@@ -103,7 +104,9 @@ class Conversation < ApplicationRecord
     open.where('last_activity_at < ?', Time.now.utc - auto_resolve_after.minutes)
   }
   scope :post_conversations, -> { where("additional_attributes->>'conversation_type' = ?", 'post') }
-  scope :regular_conversations, -> { where("additional_attributes->>'conversation_type' IS NULL OR additional_attributes->>'conversation_type' != ?", 'post') }
+  scope :regular_conversations, lambda {
+    where("additional_attributes->>'conversation_type' IS NULL OR additional_attributes->>'conversation_type' != ?", 'post')
+  }
 
   scope :last_user_message_at, lambda {
     joins(
@@ -130,12 +133,13 @@ class Conversation < ApplicationRecord
   has_many :pipeline_items, dependent: :destroy_async
   has_many :pipelines, through: :pipeline_items
 
-  before_save :ensure_snooze_until_reset
   before_create :ensure_display_id
   before_create :determine_conversation_status
   before_create :ensure_waiting_since
 
   after_update_commit :execute_after_update_commit_callbacks
+  after_update :invalidate_followup_work
+  after_update_commit -> { PipelineClassification::ModelHooks.conversation_updated(self) }
   after_create_commit :notify_conversation_creation, unless: :imported?
   after_create_commit :load_attributes_created_by_db_triggers
   after_create_commit :publish_conversation_created, unless: :imported?
@@ -144,6 +148,10 @@ class Conversation < ApplicationRecord
   after_update_commit :publish_conversation_resolved
   after_destroy_commit :publish_conversation_deleted
   after_destroy_commit :sync_session_delete
+
+  def invalidate_followup_work
+    Followups::Lifecycle.conversation_updated(self)
+  end
 
   def auto_resolve_after
     nil
@@ -261,7 +269,7 @@ class Conversation < ApplicationRecord
     additional_attributes&.dig('post_data') || {}
   end
 
-  def is_boosted_post?
+  def is_boosted_post? # rubocop:disable Naming/PredicateName -- Preserve the existing public predicate API.
     additional_attributes&.dig('is_boosted') == true
   end
 
@@ -310,16 +318,18 @@ class Conversation < ApplicationRecord
     # If status is 'open' and it's a new record, it's likely the DB default, so we should apply inbox default
     status_explicitly_set = @status_explicitly_set || false
 
-    Rails.logger.info("[Conversation] determine_conversation_status - Status before: #{status}, explicitly_set: #{status_explicitly_set}, inbox_id: #{inbox_id}")
+    Rails.logger.info("[Conversation] determine_conversation_status - Status before: #{status}, " \
+                      "explicitly_set: #{status_explicitly_set}, inbox_id: #{inbox_id}")
 
     # Always apply inbox default_conversation_status unless status was explicitly set
     # The database default is 'open', so if status is 'open' on a new record, it's likely the default
-    unless status_explicitly_set
-      inbox_default = inbox.default_conversation_status_value
-      Rails.logger.info("[Conversation] determine_conversation_status - Applying inbox default: #{inbox_default} (inbox.default_conversation_status: #{inbox.default_conversation_status})")
-      self.status = inbox_default
-    else
+    if status_explicitly_set
       Rails.logger.info("[Conversation] determine_conversation_status - Status was explicitly set, keeping: #{status}")
+    else
+      inbox_default = inbox.default_conversation_status_value
+      Rails.logger.info("[Conversation] determine_conversation_status - Applying inbox default: #{inbox_default} " \
+                        "(inbox.default_conversation_status: #{inbox.default_conversation_status})")
+      self.status = inbox_default
     end
 
     Rails.logger.info("[Conversation] determine_conversation_status - Final status: #{status}")
@@ -412,10 +422,10 @@ class Conversation < ApplicationRecord
     return unless saved_changes.any?
 
     publish(:conversation_updated, data: {
-      conversation: self,
-      changed_attributes: previous_changes,
-      api_access_token: Current.api_access_token
-    })
+              conversation: self,
+              changed_attributes: previous_changes,
+              api_access_token: Current.api_access_token
+            })
   end
 
   def publish_conversation_deleted
@@ -431,10 +441,10 @@ class Conversation < ApplicationRecord
     return unless saved_change_to_status? && resolved?
 
     publish(:conversation_resolved, data: {
-      conversation: self,
-      performed_by: Current.executed_by,
-      api_access_token: Current.api_access_token
-    })
+              conversation: self,
+              performed_by: Current.executed_by,
+              api_access_token: Current.api_access_token
+            })
   end
 
   def sync_session_delete
@@ -443,7 +453,8 @@ class Conversation < ApplicationRecord
     AgentBots::SessionSyncService.delete_session_for_conversation(self)
   end
 
-  def assign_to_default_pipeline
+  # Preserve the existing default-pipeline assignment callback and guard order.
+  def assign_to_default_pipeline # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     target_pipeline, target_stage, lead_item = resolve_target_pipeline
 
     unless target_pipeline
@@ -517,15 +528,15 @@ class Conversation < ApplicationRecord
     # Prioridade 1: pipeline ativo do contato (mais recente, apenas leads — conversation_id: nil)
     if contact_id.present?
       contact_item = PipelineItem
-                       .active
-                       .where(contact_id: contact_id, conversation_id: nil)
-                       .order(created_at: :desc)
-                       .includes(:pipeline, :pipeline_stage)
-                       .first
+                     .active
+                     .where(contact_id: contact_id, conversation_id: nil)
+                     .order(created_at: :desc)
+                     .includes(:pipeline, :pipeline_stage)
+                     .first
 
       if contact_item
-        Rails.logger.info "[Pipeline] Contact #{contact_id} already in pipeline '#{contact_item.pipeline.name}'" \
-                          " / stage '#{contact_item.pipeline_stage.name}' — promoting it for conversation #{id}"
+        Rails.logger.info "[Pipeline] Contact #{contact_id} already in pipeline '#{contact_item.pipeline.name}' " \
+                          "/ stage '#{contact_item.pipeline_stage.name}' — promoting it for conversation #{id}"
         # 3º valor = o PRÓPRIO card de lead → assign_to_default_pipeline o PROMOVE (em vez de criar 2º).
         return [contact_item.pipeline, contact_item.pipeline_stage, contact_item]
       end
@@ -538,7 +549,7 @@ class Conversation < ApplicationRecord
     [default_pipeline, nil, nil]
   end
 
-  # Note: Database trigger removed - display_id is now generated in Ruby via before_create callback
+  # NOTE: Database trigger removed - display_id is now generated in Ruby via before_create callback
 end
 
 Conversation.include_mod_with('Concerns::Conversation')

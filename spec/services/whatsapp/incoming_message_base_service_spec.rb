@@ -17,9 +17,7 @@ RSpec.describe Whatsapp::IncomingMessageBaseService do
     Class.new(Whatsapp::IncomingMessageBaseService) do
       attr_writer :processed_params
 
-      def processed_params
-        @processed_params
-      end
+      attr_reader :processed_params
     end
   end
 
@@ -98,16 +96,16 @@ RSpec.describe Whatsapp::IncomingMessageBaseService do
     it 'persists the provider timestamp as created_at and external_created_at' do
       timestamp = 1_791_990_312
       created_at = Time.zone.at(timestamp)
-      messages = double('conversation messages')
+      messages = instance_double(ActiveRecord::Associations::CollectionProxy)
       allow(service).to receive(:message_content).and_return('Mensagem de teste')
-      service.instance_variable_set(:@conversation, double(messages: messages))
-      service.instance_variable_set(:@contact, double('contact'))
-      service.instance_variable_set(:@inbox, double(id: 42))
+      service.instance_variable_set(:@conversation, instance_double(Conversation, messages: messages))
+      service.instance_variable_set(:@contact, instance_double(Contact))
+      service.instance_variable_set(:@inbox, instance_double(Inbox, id: 42))
 
       expect(messages).to receive(:build).with(hash_including(
-        created_at: created_at,
-        content_attributes: { external_created_at: created_at.iso8601 }
-      ))
+                                                 created_at: created_at,
+                                                 content_attributes: { external_created_at: created_at.iso8601 }
+                                               ))
 
       service.send(:create_message, { id: 'wamid.test', type: 'text', timestamp: timestamp })
     end
@@ -121,6 +119,7 @@ RSpec.describe Whatsapp::IncomingMessageBaseService do
     it 'AC9 e2e: duplicate delivered webhook produces only one Wisper publish' do
       already_delivered = instance_double(
         Message, id: 42, status: 'delivered', delivered?: true, read?: false, failed?: false,
+                 has_attribute?: true, followup_execution_id: nil,
                  content_attributes: {}
       )
       allow(Message).to receive(:statuses).and_return('sent' => 0, 'delivered' => 1, 'read' => 2, 'failed' => 3)

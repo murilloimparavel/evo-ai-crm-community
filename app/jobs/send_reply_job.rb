@@ -1,8 +1,16 @@
 class SendReplyJob < ApplicationJob
   queue_as :high
 
-  def perform(message_id)
+  # Keep the execution fence and provider dispatch guard in their existing order.
+  def perform(message_id) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     message = Message.find(message_id)
+    if Followups::DispatchProtection.managed?(message)
+      execution = FollowupExecution.find_by(id: message.followup_execution_id)
+      unless execution&.target_available?
+        Followups::Retention.retire!(execution) if execution
+        return
+      end
+    end
     conversation = message.conversation
     channel_name = conversation.inbox.channel.class.to_s
 

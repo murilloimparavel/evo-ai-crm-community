@@ -21,6 +21,14 @@
 #
 class PipelineStage < ApplicationRecord
   belongs_to :pipeline
+  before_validation :set_default_automation_rules
+  before_validation :set_default_custom_fields
+  around_save :lock_classification_aggregate
+  after_update :cleanup_removed_attributes_from_items
+  before_destroy :reassign_conversations_to_first_stage
+  around_destroy :lock_classification_aggregate
+  after_destroy :invalidate_classification_catalog
+  after_save :invalidate_classification_catalog, if: -> { saved_change_to_name? || saved_change_to_classification_profile? }
   has_many :pipeline_items, dependent: :destroy
   has_many :conversations, through: :pipeline_items
   has_many :stage_movements_from, class_name: 'StageMovement', foreign_key: 'from_stage_id', dependent: :destroy, inverse_of: :from_stage
@@ -38,10 +46,13 @@ class PipelineStage < ApplicationRecord
 
   scope :ordered, -> { order(:position) }
 
-  before_validation :set_default_automation_rules
-  before_validation :set_default_custom_fields
-  after_update :cleanup_removed_attributes_from_items
-  before_destroy :reassign_conversations_to_first_stage
+  def lock_classification_aggregate(&)
+    pipeline.with_lock(&)
+  end
+
+  def invalidate_classification_catalog
+    PipelineClassification::Lifecycle.pipeline_changed!(pipeline: pipeline)
+  end
 
   def item_count
     pipeline_items.count
@@ -75,21 +86,22 @@ class PipelineStage < ApplicationRecord
   def set_default_custom_fields
     self.custom_fields = {} if custom_fields.blank?
     # Ensure attributes is always an array
-    self.custom_fields['attributes'] ||= []
+    custom_fields['attributes'] ||= []
     # Normalize: keep only attributes array, remove any other keys
     self.custom_fields = { 'attributes' => custom_fields['attributes'] }
   end
 
-  def cleanup_removed_attributes_from_items
+  # Preserve the existing attribute-removal cleanup callback contract.
+  def cleanup_removed_attributes_from_items # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return unless saved_change_to_custom_fields?
 
     old_value, new_value = saved_change_to_custom_fields
     old_attributes = (old_value&.dig('attributes') || []).map(&:to_s)
     new_attributes = (new_value&.dig('attributes') || []).map(&:to_s)
-    
+
     # Find attributes that were removed
     removed_attributes = old_attributes - new_attributes
-    
+
     return if removed_attributes.empty?
 
     # Clean up removed attributes from all pipeline items in this stage

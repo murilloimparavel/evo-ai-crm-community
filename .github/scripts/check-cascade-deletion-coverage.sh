@@ -46,6 +46,21 @@ is_parent() {
 # naive rule is safe: a name it pluralizes wrong simply is not a parent.
 pluralize() { case "$1" in *s) printf '%s' "$1" ;; *) printf '%ss' "$1" ;; esac; }
 
+# SET NULL is safe only when the final schema proves that the exact FK column
+# exists and accepts NULL. Missing columns and NOT NULL must fail closed.
+schema_column_nullable() {
+  awk -v wanted_table="$1" -v wanted_column="$2" '
+    /create_table[[:space:]]+"[^"]+"/ {
+      cur = $0; sub(/.*create_table[[:space:]]+"/, "", cur); sub(/".*/, "", cur)
+    }
+    cur == wanted_table && /^[[:space:]]*t\.[a-z0-9_]+[[:space:]]+"/ {
+      column = $0; sub(/.*t\.[a-z0-9_]+[[:space:]]+"/, "", column); sub(/".*/, "", column)
+      if (column == wanted_column) { found = 1; exit ($0 ~ /null:[[:space:]]*false/) ? 1 : 0 }
+    }
+    END { if (!found) exit 1 }
+  ' "$SCHEMA"
+}
+
 # ---------------------------------------------------------------------------
 # 1. Collect (child, parent, cascade) triples from db/schema.rb.
 # ---------------------------------------------------------------------------
@@ -62,6 +77,11 @@ while IFS= read -r line; do
   parent="$(printf '%s' "$line" | sed -E 's/.*add_foreign_key "([^"]+)", "([^"]+)".*/\2/')"
   cascade=no
   printf '%s' "$line" | grep -q 'on_delete: :cascade' && cascade=yes
+  if printf '%s' "$line" | grep -q 'on_delete: :nullify'; then
+    column="$(printf '%s' "$line" | sed -nE 's/.*column: "([^"]+)".*/\1/p')"
+    column="${column:-${parent%s}_id}"
+    schema_column_nullable "$child" "$column" && cascade=yes
+  fi
   pairs="${pairs}${child} ${parent} ${cascade} ${SCHEMA}
 "
 done < <(grep -E '^[[:space:]]*add_foreign_key "[^"]+", "[^"]+"' "$SCHEMA")
@@ -87,8 +107,9 @@ if [ "$MIGRATE_DIR" != "-" ] && [ -d "$MIGRATE_DIR" ]; then
   is_dead() { printf '%s\n' "$dead" | grep -qxF "$1"; }
 
   mig_pairs="$(awk '
-    function emit(child, ref, cascade) {
+    function emit(child, ref, cascade, column) {
       gsub(/[^a-z0-9_]/, "", ref); if (ref == "" || child == "") return
+      if (cascade == "nullify") cascade = "nullify:" column
       print child " " ref " " cascade " " FILENAME
     }
     # create_table :foo / create_table "foo" opens a block; t.references inside it
@@ -101,28 +122,38 @@ if [ "$MIGRATE_DIR" != "-" ] && [ -d "$MIGRATE_DIR" ]; then
     /[[:space:]]t\.(references|belongs_to)[[:space:]]+:[a-z0-9_]+/ {
       if (cur == "" || $0 !~ /foreign_key/) next
       r = $0; sub(/.*t\.(references|belongs_to)[[:space:]]+:/, "", r); sub(/[^a-z0-9_].*/, "", r)
+      column = r "_id"
       if ($0 ~ /to_table:[[:space:]]*[:"]/) { r = $0; sub(/.*to_table:[[:space:]]*[:"]/, "", r); sub(/[^a-z0-9_].*/, "", r) }
-      emit(cur, r, ($0 ~ /on_delete:[[:space:]]*:cascade/) ? "yes" : "no")
+      action = ($0 ~ /on_delete:[[:space:]]*:cascade/) ? "yes" : (($0 ~ /on_delete:[[:space:]]*:nullify/ && $0 !~ /null:[[:space:]]*false/) ? "nullify" : "no")
+      emit(cur, r, action, column)
     }
     # add_reference :sla_reports, :conversation, foreign_key: true
     /add_reference[( ]+[:"][a-z0-9_]+/ {
       if ($0 !~ /foreign_key/) next
       c = $0; sub(/.*add_reference[( ]+[:"]/, "", c); sub(/[^a-z0-9_].*/, "", c)
       r = $0; sub(/.*add_reference[( ]+[:"][a-z0-9_]+[^:"]*[:"]/, "", r); sub(/[^a-z0-9_].*/, "", r)
+      column = r "_id"
       if ($0 ~ /to_table:[[:space:]]*[:"]/) { r = $0; sub(/.*to_table:[[:space:]]*[:"]/, "", r); sub(/[^a-z0-9_].*/, "", r) }
-      emit(c, r, ($0 ~ /on_delete:[[:space:]]*:cascade/) ? "yes" : "no")
+      action = ($0 ~ /on_delete:[[:space:]]*:cascade/) ? "yes" : (($0 ~ /on_delete:[[:space:]]*:nullify/ && $0 !~ /null:[[:space:]]*false/) ? "nullify" : "no")
+      emit(c, r, action, column)
     }
     # add_foreign_key :sla_reports, :conversations (symbol form, absent from the dump)
     /add_foreign_key[( ]+[:"][a-z0-9_]+/ {
       c = $0; sub(/.*add_foreign_key[( ]+[:"]/, "", c); sub(/[^a-z0-9_].*/, "", c)
       r = $0; sub(/.*add_foreign_key[( ]+[:"][a-z0-9_]+[^:"]*[:"]/, "", r); sub(/[^a-z0-9_].*/, "", r)
-      emit(c, r, ($0 ~ /on_delete:[[:space:]]*:cascade/) ? "yes" : "no")
+      column = r; sub(/s$/, "", column); column = column "_id"
+      if ($0 ~ /column:[[:space:]]*[:"]/) { column = $0; sub(/.*column:[[:space:]]*[:"]/, "", column); sub(/[^a-z0-9_].*/, "", column) }
+      action = ($0 ~ /on_delete:[[:space:]]*:cascade/) ? "yes" : (($0 ~ /on_delete:[[:space:]]*:nullify/) ? "nullify" : "no")
+      emit(c, r, action, column)
     }
   ' "$MIGRATE_DIR"/*.rb 2>/dev/null)"
 
   while IFS=' ' read -r child ref cascade src; do
     [ -z "${child:-}" ] && continue
     is_dead "$child" && continue
+    case "$cascade" in
+      nullify:*) schema_column_nullable "$child" "${cascade#nullify:}" && cascade=yes ;;
+    esac
     pairs="${pairs}${child} $(pluralize "$ref") ${cascade} ${src}
 "
   done <<< "$mig_pairs"
@@ -194,13 +225,13 @@ seen=""
 while IFS=' ' read -r child parent cascade src; do
   [ -z "${child:-}" ] && continue
   is_parent "$parent" || continue
-  [ "$cascade" = "yes" ] && continue          # the DB handles it
+  [ "$cascade" = "yes" ] && continue          # CASCADE or verified nullable SET NULL handles it
   case " $seen " in *" ${child}>${parent} "*) continue ;; esac
   seen="${seen}${child}>${parent} "
   checked=$((checked + 1))
 
   if ! in_allow "$child" "$parent"; then
-    err "FK '${child}' -> '${parent}' (${src}) has no ON DELETE CASCADE and is not in ${ALLOWLIST}. Deleting a contact/conversation/inbox will fail with PG::ForeignKeyViolation (422 on the contact path, 500 on the job path) unless something removes '${child}' first. Fix: add on_delete: :cascade, OR a synchronous 'dependent: :destroy' association (NOT :destroy_async — it enqueues a job and does not delete in the same transaction), OR add '${child} ${parent}' to the allowlist AFTER covering it in cleanup_contact_dependent_records AND DeleteObjectJob#cleanup_conversation_dependencies! (EVO-2187)."
+    err "FK '${child}' -> '${parent}' (${src}) has no safe ON DELETE CASCADE / nullable SET NULL and is not in ${ALLOWLIST}. Deleting a contact/conversation/inbox will fail with PG::ForeignKeyViolation (422 on the contact path, 500 on the job path) unless something removes '${child}' first. Fix: add on_delete: :cascade, OR on_delete: :nullify with an existing nullable FK column in the final schema, OR a synchronous 'dependent: :destroy' association (NOT :destroy_async — it enqueues a job and does not delete in the same transaction), OR add '${child} ${parent}' to the allowlist AFTER covering it in cleanup_contact_dependent_records AND DeleteObjectJob#cleanup_conversation_dependencies! (EVO-2187)."
     continue
   fi
 
@@ -210,6 +241,6 @@ while IFS=' ' read -r child parent cascade src; do
 done <<< "$pairs"
 
 if [ "$fail" -eq 0 ]; then
-  echo "OK: ${checked} non-cascade FK(s) into the contact/conversation delete chain, all allowlisted with real cleanup coverage (EVO-2187)."
+  echo "OK: ${checked} FK(s) without safe database deletion handling into the contact/conversation delete chain, all allowlisted with real cleanup coverage (EVO-2187)."
 fi
 exit "$fail"

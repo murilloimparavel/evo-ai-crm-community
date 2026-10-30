@@ -19,11 +19,15 @@ module Followups
 
       state = state!(row)
       raise Open, 'provider_manual_reset_required' if state['manual_reset_required']
+
       until_time = parse_time(state['open_until'])
       raise Open, 'provider_circuit_open' if until_time && until_time > now
+
       true
     end
 
+    # The closed provider-result contract must be validated completely before changing shared breaker state.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def record(result:, campaign: nil, model: nil, questions: nil, now: Time.current)
       reason = result.is_a?(Hash) ? result[:reason] : nil
       failed = failure_reason?(reason)
@@ -54,11 +58,13 @@ module Followups
       end
       nil
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     def reset!(actor:, now: Time.current)
       unless actor.is_a?(User) && actor.persisted? && actor.has_permission?('installation_configs.manage')
         raise Open, 'provider_reset_operator_required'
       end
+
       row = InstallationConfig.create_or_find_by!(name: NAME) { |config| config.value = initial_state }
       row.with_lock do
         state = initial_state.merge('reset_by_user_id' => actor.id, 'reset_at' => now.iso8601(6))
@@ -79,14 +85,17 @@ module Followups
       unless threshold.is_a?(Integer) && threshold.between?(1, 100) && cooldown.is_a?(Integer) && cooldown.between?(1, 86_400)
         raise Open, 'provider_circuit_configuration_invalid'
       end
+
       [threshold, cooldown]
     end
 
     def state!(row)
       state = row.value
-      unless state.is_a?(Hash) && state['consecutive_failures'].is_a?(Integer) && state['consecutive_failures'] >= 0 && [true, false].include?(state['manual_reset_required']) && (state['open_until'].nil? || parse_time(state['open_until']))
-        raise Open, 'provider_circuit_state_invalid'
-      end
+      valid = state.is_a?(Hash) && state['consecutive_failures'].is_a?(Integer) && state['consecutive_failures'] >= 0 &&
+              [true, false].include?(state['manual_reset_required']) &&
+              (state['open_until'].nil? || parse_time(state['open_until']))
+      raise Open, 'provider_circuit_state_invalid' unless valid
+
       state.stringify_keys
     end
 
@@ -100,27 +109,38 @@ module Followups
     end
 
     def failure_reason?(reason)
-      reason.is_a?(String) && (%w[classification_transport_error classification_timeout invalid_provider_schema].include?(reason) || reason.match?(/\Aprovider_http_[1-5]\d{2}\z/))
+      reason.is_a?(String) && (%w[classification_transport_error classification_timeout
+                                  invalid_provider_schema].include?(reason) || reason.match?(/\Aprovider_http_[1-5]\d{2}\z/))
     end
 
+    # The closed provider-result contract must be validated completely before changing shared breaker state.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def provider_success?(result, campaign, model: nil, questions: nil)
       expected_model = model || campaign&.policy&.dig('classifier', 'model')
       return false unless [Ai::JevClient::MODEL, Ai::JevClient::OPENROUTER_MODEL].include?(expected_model)
-      return false unless result.is_a?(Hash) && result[:model] == expected_model && result[:usage_known] == true && result[:input_tokens].is_a?(Integer) && result[:input_tokens] >= 0
+      unless result.is_a?(Hash) && result[:model] == expected_model && result[:usage_known] == true &&
+             result[:input_tokens].is_a?(Integer) && result[:input_tokens] >= 0
+        return false
+      end
       return false if result.key?(:cost_known) && result[:cost_known] != true
+
       answers = result[:classification]
       questions ||= campaign&.policy&.dig('classifier', 'questions')
       return false unless answers.is_a?(Hash) && questions.is_a?(Hash) && answers.keys.sort == questions.keys.sort
 
       questions.all? do |key, question|
         answer = answers[key]
-        next false unless answer.is_a?(Hash) && answer['type'] == question['type'] && (answer.keys - %w[type choice confidence noul score probabilities]).empty?
-        if question['type'] == 'noul'
-          next probability?(answer['noul'])
-        end
+        next false unless answer.is_a?(Hash) && answer['type'] == question['type'] && (answer.keys - %w[type choice confidence noul score
+                                                                                                        probabilities]).empty?
+        next probability?(answer['noul']) if question['type'] == 'noul'
+
         keys = question['type'] == 'score' ? question['criteria'].each_index.map(&:to_s) : question['criteria'].keys
         probabilities = answer['probabilities']
-        next false unless probability?(answer['confidence']) && probabilities.is_a?(Hash) && probabilities.keys.sort == keys.sort && probabilities.values.all? { |value| probability?(value) } && (probabilities.values.sum - 1).abs <= 0.001
+        next false unless probability?(answer['confidence']) && probabilities.is_a?(Hash) &&
+                          probabilities.keys.sort == keys.sort && probabilities.values.all? do |value|
+                                                                    probability?(value)
+                                                                  end && (probabilities.values.sum - 1).abs <= 0.001
+
         if question['type'] == 'score'
           score = answer['score']
           score.is_a?(Numeric) && score.finite? && score.between?(0, keys.length - 1)
@@ -131,6 +151,7 @@ module Followups
     rescue NoMethodError, TypeError, ArgumentError
       false
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     def probability?(value)
       value.is_a?(Numeric) && value.finite? && value.between?(0, 1)

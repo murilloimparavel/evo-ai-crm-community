@@ -39,13 +39,13 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
         :contact,
         :assignee,
         :team,
-        messages: [:attachments, :sender]
+        { messages: [:attachments, :sender] }
       ]
     )
 
     apply_filters
     apply_sorting
-    
+
     success_response(
       data: PipelineItemSerializer.serialize_collection(@pipeline_items, include_entity: true),
       message: 'Pipeline items retrieved successfully'
@@ -69,7 +69,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       end
 
       # Check if conversation has an ACTIVE (not completed) item in this pipeline
-      if @pipeline.pipeline_items.where(conversation: conversation, completed_at: nil).exists?
+      if @pipeline.pipeline_items.exists?(conversation: conversation, completed_at: nil)
         error_response(
           ApiErrorCodes::BUSINESS_RULE_VIOLATION,
           'Item already has an active journey in this pipeline'
@@ -90,7 +90,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       end
 
       # Check if contact has an ACTIVE (not completed) item in this pipeline
-      if @pipeline.pipeline_items.where(contact: contact, completed_at: nil).exists?
+      if @pipeline.pipeline_items.exists?(contact: contact, completed_at: nil)
         error_response(
           ApiErrorCodes::BUSINESS_RULE_VIOLATION,
           'Contact already has an active journey in this pipeline'
@@ -149,7 +149,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
           :contact,
           :assignee,
           :team,
-          messages: [:attachments, :sender]
+          { messages: [:attachments, :sender] }
         ]
       ).find(@pipeline_item.id)
 
@@ -318,7 +318,8 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   end
   # rubocop:enable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
-  def destroy
+  # Preserve the existing permission-scoped query and response/error flow during the OFF rollout.
+  def destroy # rubocop:disable Metrics/MethodLength
     conversation = @pipeline_item.conversation
     @pipeline_item.destroy!
 
@@ -487,19 +488,20 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     )
   end
 
-  def available_conversations
+  # Preserve the existing permission-scoped query and response/error flow during the OFF rollout.
+  def available_conversations # rubocop:disable Metrics/MethodLength
     # Get conversation IDs that are already in THIS specific pipeline
     conversation_ids_in_pipeline = @pipeline.pipeline_items
-                                             .where.not(conversation_id: nil)
-                                             .pluck(:conversation_id)
+                                            .where.not(conversation_id: nil)
+                                            .pluck(:conversation_id)
 
     current_conversations = Conversations::PermissionFilterService.new(Conversation.all, current_user).perform
-                      .joins(:contact, :inbox)
-                      .where.not(conversations: { id: conversation_ids_in_pipeline })
-                      .where.not(status: 'resolved')
-                      .includes(:contact, :inbox, :assignee, :team)
-                      .order(last_activity_at: :desc)
-                      .limit(50)
+                                                                  .joins(:contact, :inbox)
+                                                                  .where.not(conversations: { id: conversation_ids_in_pipeline })
+                                                                  .where.not(status: 'resolved')
+                                                                  .includes(:contact, :inbox, :assignee, :team)
+                                                                  .order(last_activity_at: :desc)
+                                                                  .limit(50)
 
     # Apply search filter if provided
     if params[:search].present?
@@ -522,10 +524,10 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     contacts_in_current_pipeline = @pipeline.pipeline_items.where.not(contact_id: nil).select(:contact_id)
 
     current_contacts = Contact.non_groups
-                       .includes(avatar_attachment: :blob)
-                       .where.not(contacts: { id: contacts_in_current_pipeline })
-                       .order(name: :desc)
-                       .limit(50)
+                              .includes(avatar_attachment: :blob)
+                              .where.not(contacts: { id: contacts_in_current_pipeline })
+                              .order(name: :desc)
+                              .limit(50)
 
     # Apply search filter if provided
     if params[:search].present?
@@ -617,12 +619,12 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
 
   def dispatch_conversation_updated_event(conversation)
     # Update conversation timestamp to ensure frontend gets the update (only for deals, not leads)
-      # Using touch to sync conversation timestamps with frontend
-      if conversation.present?
-        conversation.touch # rubocop:disable Rails/SkipsModelValidations
-        # Dispatch events to update frontend
-        Rails.application.config.dispatcher.dispatch(CONVERSATION_UPDATED, Time.zone.now, conversation: conversation)
-      end
+    # Using touch to sync conversation timestamps with frontend
+    return if conversation.blank?
+
+    conversation.touch # rubocop:disable Rails/SkipsModelValidations
+    # Dispatch events to update frontend
+    Rails.application.config.dispatcher.dispatch(CONVERSATION_UPDATED, Time.zone.now, conversation: conversation)
   end
 
   def set_pipeline
@@ -699,10 +701,10 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   def search_conversations
     search_term = "%#{params[:search]}%"
     @pipeline_items.joins(conversation: :contact)
-                           .where(
-                             'contacts.name ILIKE ? OR contacts.email ILIKE ? OR conversations.id::text ILIKE ?',
-                             search_term, search_term, search_term
-                           )
+                   .where(
+                     'contacts.name ILIKE ? OR contacts.email ILIKE ? OR conversations.id::text ILIKE ?',
+                     search_term, search_term, search_term
+                   )
   end
 
   def stage_statistics
@@ -724,7 +726,8 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
                  .map(&:push_event_data)
   end
 
-  def apply_filters
+  # Preserve the existing permission-scoped query and response/error flow during the OFF rollout.
+  def apply_filters # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     # Status filter: active (default), completed, all
     case params[:status]
     when 'completed'
@@ -743,21 +746,13 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       range = temporal_range(params[:completed_period])
       @pipeline_items = @pipeline_items.where(completed_at: range) if range
     else
-      if params[:completed_after].present?
-        @pipeline_items = @pipeline_items.where('completed_at >= ?', Time.zone.parse(params[:completed_after]))
-      end
-      if params[:completed_before].present?
-        @pipeline_items = @pipeline_items.where('completed_at <= ?', Time.zone.parse(params[:completed_before]))
-      end
+      @pipeline_items = @pipeline_items.where('completed_at >= ?', Time.zone.parse(params[:completed_after])) if params[:completed_after].present?
+      @pipeline_items = @pipeline_items.where('completed_at <= ?', Time.zone.parse(params[:completed_before])) if params[:completed_before].present?
     end
 
     # Entered date filters
-    if params[:entered_after].present?
-      @pipeline_items = @pipeline_items.where('entered_at >= ?', Time.zone.parse(params[:entered_after]))
-    end
-    if params[:entered_before].present?
-      @pipeline_items = @pipeline_items.where('entered_at <= ?', Time.zone.parse(params[:entered_before]))
-    end
+    @pipeline_items = @pipeline_items.where('entered_at >= ?', Time.zone.parse(params[:entered_after])) if params[:entered_after].present?
+    @pipeline_items = @pipeline_items.where('entered_at <= ?', Time.zone.parse(params[:entered_before])) if params[:entered_before].present?
 
     @pipeline_items = filter_by_stage if params[:stage_id].present?
     @pipeline_items = search_conversations if params[:search].present?

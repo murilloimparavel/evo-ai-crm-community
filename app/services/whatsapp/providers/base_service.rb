@@ -32,7 +32,8 @@ class Whatsapp::Providers::BaseService
 
   # Meta Graph shape as the default; a non-JSON body (proxy 502) parses to a
   # String, which has no #dig — fall back to the raw body.
-  def error_message(response)
+  # Existing production135c333 provider normalization retained without changing legacy delivery behavior.
+  def error_message(response) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     parsed = response.respond_to?(:parsed_response) ? response.parsed_response : nil
     status = response.respond_to?(:code) ? response.code : nil
     details = if parsed.is_a?(Hash)
@@ -45,7 +46,7 @@ class Whatsapp::Providers::BaseService
                                    extract_provider_error_detail(error)
 
                 if provider_message.present?
-                  if provider_code.present? && !provider_message.include?(provider_code.to_s)
+                  if provider_code.present? && provider_message.exclude?(provider_code.to_s)
                     "#{provider_code}: #{provider_message}"
                   else
                     provider_message
@@ -60,12 +61,12 @@ class Whatsapp::Providers::BaseService
               end
 
     details.gsub(/[\r\n\t]/, ' ')
-      .gsub(/Bearer\s+[A-Za-z0-9._-]+/i, 'Bearer [redacted]')
-      .gsub(/\b(api[_ -]?key|admin[_ -]?token|access[_ -]?token|authorization)\b\s*[:=]\s*["']?[^,\s"'}]+/i, '\\1=[redacted]')
-      .gsub(/\b[\w.+-]+@(?:s\.whatsapp\.net|g\.us|lid)\b/i, '[recipient]')
-      .gsub(/\+?\d[\d\s().-]{6,}\d/, '[number]')
-      .gsub(/[A-Za-z0-9_-]{40,}/, '[redacted]')
-      .truncate(240)
+           .gsub(/Bearer\s+[A-Za-z0-9._-]+/i, 'Bearer [redacted]')
+           .gsub(/\b(api[_ -]?key|admin[_ -]?token|access[_ -]?token|authorization)\b\s*[:=]\s*["']?[^,\s"'}]+/i, '\\1=[redacted]')
+           .gsub(/\b[\w.+-]+@(?:s\.whatsapp\.net|g\.us|lid)\b/i, '[recipient]')
+           .gsub(/\+?\d[\d\s().-]{6,}\d/, '[number]')
+           .gsub(/[A-Za-z0-9_-]{40,}/, '[redacted]')
+           .truncate(240)
   end
 
   def extract_provider_error_detail(value)
@@ -128,13 +129,14 @@ class Whatsapp::Providers::BaseService
     rows
   end
 
-  def html_to_whatsapp(text)
+  # Existing production135c333 provider normalization retained without changing legacy delivery behavior.
+  def html_to_whatsapp(text) # rubocop:disable Metrics/MethodLength
     return '' if text.blank?
 
     result = text.dup
     result.gsub!(%r{<br\s*/?>}i, "\n")
     result.gsub!(%r{</p>\s*<p[^>]*>}i, "\n\n")
-    result.gsub!(%r{<li[^>]*>}i, "- ")
+    result.gsub!(/<li[^>]*>/i, '- ')
     result.gsub!(%r{</li>}i, "\n")
     result.gsub!(%r{</?[uo]l[^>]*>}i, "\n")
     result.gsub!(%r{</?(p|div)[^>]*>}i, "\n")
@@ -186,6 +188,7 @@ class Whatsapp::Providers::BaseService
 
     pruned = lines.join("\n").strip
     return content unless removed_any
+
     pruned.presence || content
   end
 

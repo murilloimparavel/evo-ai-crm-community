@@ -15,8 +15,9 @@ class KnowledgeEntry < ApplicationRecord
     limit = limit.to_i.clamp(1, 20)
     published.where(
       "to_tsvector('portuguese', coalesce(title, '') || ' ' || coalesce(body, '')) @@ plainto_tsquery('portuguese', ?)", query
-    ).order(Arel.sql("ts_rank(to_tsvector('portuguese', coalesce(title, '') || ' ' || coalesce(body, '')), plainto_tsquery('portuguese', #{connection.quote(query)})) DESC"))
-      .limit(limit)
+    ).order(Arel.sql("ts_rank(to_tsvector('portuguese', coalesce(title, '') || ' ' || coalesce(body, '')), " \
+                     "plainto_tsquery('portuguese', #{connection.quote(query)})) DESC"))
+             .limit(limit)
   end
 
   private

@@ -9,11 +9,20 @@ module Followups
 
       campaign = execution.followup_campaign
       campaign.with_lock do
+        # Keep this lifecycle-only SQL update atomic; callbacks must not reopen cancelled or fenced work.
+        # rubocop:disable Rails/SkipsModelValidations
         campaign.update_columns(enabled: false, mode: 'off', updated_at: now)
+        # rubocop:enable Rails/SkipsModelValidations
         FollowupExecution.where(followup_campaign_id: campaign.id, status: FollowupExecution::PENDING)
+                         # Keep this lifecycle-only SQL update atomic; callbacks must not reopen cancelled or fenced work.
+                         # rubocop:disable Rails/SkipsModelValidations
                          .update_all(status: 'cancelled', reason: 'incident_campaign_stopped', finalized_at: now, updated_at: now)
+        # rubocop:enable Rails/SkipsModelValidations
         FollowupClassification.where(followup_campaign_id: campaign.id, status: %w[reserved evaluating retryable_error])
+                              # Keep this lifecycle-only SQL update atomic; callbacks must not reopen cancelled or fenced work.
+                              # rubocop:disable Rails/SkipsModelValidations
                               .update_all(status: 'cancelled', reason: 'incident_campaign_stopped', updated_at: now)
+        # rubocop:enable Rails/SkipsModelValidations
         execution.reload
         uncertain = %w[dispatching dispatched delivered read delivery_unknown].include?(execution.status)
         execution.update!(status: uncertain ? 'delivery_unknown' : 'cancelled', reason: "incident_#{reason}",
@@ -21,7 +30,10 @@ module Followups
       end
       # Do not acquire conversation-state locks while holding the campaign lock.
       ids = FollowupExecution.where(followup_campaign_id: campaign.id).select(:id)
+      # Keep this lifecycle-only SQL update atomic; callbacks must not reopen cancelled or fenced work.
+      # rubocop:disable Rails/SkipsModelValidations
       FollowupConversationState.where(active_execution_id: ids).update_all(active_execution_id: nil, updated_at: now)
+      # rubocop:enable Rails/SkipsModelValidations
       Rails.logger.error({ event: 'followup_safety_stop', campaign_id: campaign.id,
                            execution_id: execution.id, reason: reason }.to_json)
       false

@@ -20,7 +20,7 @@ module BotRuntime
       event = build_message_event
       BotRuntime::SendEventJob.perform_later(event)
 
-      Rails.logger.info "[BotRuntime::DelegationService] Event enqueued: " \
+      Rails.logger.info '[BotRuntime::DelegationService] Event enqueued: ' \
                         "conversation=#{@conversation.display_id} bot=#{@agent_bot.name}"
     end
 

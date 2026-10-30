@@ -1,5 +1,7 @@
 module Followups
   class DebounceCoordinator
+    # The incoming receipt and generation/deadline changes must remain inside the same conversation lock.
+    # rubocop:disable Metrics/AbcSize
     def self.on_incoming!(message:, now: Time.current)
       return unless message.incoming? && !message.private?
 
@@ -13,6 +15,7 @@ module Followups
         state.lock!
         latest = conversation.messages.incoming.find(message.id)
         next if state.latest_incoming_message_id == message.id
+
         previous = conversation.messages.incoming.find_by(id: state.latest_incoming_message_id)
         next if previous && previous.created_at > latest.created_at
 
@@ -23,6 +26,7 @@ module Followups
       DebouncedClassificationJob.set(wait_until: deadline).perform_later(conversation.id, generation) if deadline
       generation
     end
+    # rubocop:enable Metrics/AbcSize
 
     def self.refresh!(conversation:, reason:, now: Time.current)
       target = Conversation.find(conversation.id)
@@ -50,11 +54,13 @@ module Followups
 
     def self.update_deadline!(state:, conversation:, incoming:, now:)
       campaigns = campaigns_for(conversation, now: now)
-      delays = campaigns.filter_map { |campaign| campaign.policy_object['debounce_ms'] if campaign.policy_object.valid? && campaign.policy['reclassification_enabled'] == true }
+      delays = campaigns.filter_map do |campaign|
+        campaign.policy_object['debounce_ms'] if campaign.policy_object.valid? && campaign.policy['reclassification_enabled'] == true
+      end
       generation = state.classification_generation + 1
       # If the same conversation is in several pipelines, wait for all their
       # configured quiet intervals; an inbound always invalidates immediately.
-      deadline = incoming && delays.any? ? now + delays.max / 1000.0 : nil
+      deadline = incoming && delays.any? ? now + (delays.max / 1000.0) : nil
       state.update!(classification_generation: generation, latest_incoming_message_id: incoming&.id, classification_due_at: deadline)
       [generation, deadline]
     end

@@ -1,7 +1,8 @@
 class Whatsapp::RetryRateLimitedMessageJob < ApplicationJob
   queue_as :high
 
-  def perform(message_id, attempt, retry_token = nil)
+  # Keep the legacy retry contract and managed-message fence checks together.
+  def perform(message_id, attempt, retry_token = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     message = Message.find_by(id: message_id)
     return unless message
 
@@ -20,7 +21,7 @@ class Whatsapp::RetryRateLimitedMessageJob < ApplicationJob
         eligible = execution&.status == 'queued' &&
                    (!execution.next_attempt_at || execution.next_attempt_at <= Time.current) &&
                    Followups::Eligibility.new(campaign: execution.followup_campaign, conversation: message.conversation,
-                                             execution: execution, now: Time.current, dispatch: true).reason.nil?
+                                              execution: execution, now: Time.current, dispatch: true).reason.nil?
       end
       next false unless eligible
 

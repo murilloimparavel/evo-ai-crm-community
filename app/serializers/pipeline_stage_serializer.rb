@@ -8,7 +8,7 @@
 #   PipelineStageSerializer.serialize(@pipeline_stage)
 #
 module PipelineStageSerializer
-  extend self
+  extend self # rubocop:disable Style/ModuleFunction -- Preserve the existing module and instance serializer API.
 
   # Serialize single PipelineStage
   #
@@ -17,7 +17,8 @@ module PipelineStageSerializer
   #
   # @return [Hash] Serialized pipeline stage ready for Oj
   #
-  def serialize(pipeline_stage, include_item_count: false)
+  # Serialize the existing optional stage fields with the unchanged public payload.
+  def serialize(pipeline_stage, include_item_count: false) # rubocop:disable Metrics/CyclomaticComplexity
     result = {
       id: pipeline_stage.id,
       name: pipeline_stage.name,

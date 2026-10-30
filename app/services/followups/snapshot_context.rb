@@ -9,6 +9,8 @@ module Followups
     SOURCES = %w[conversation.custom_attributes contact.custom_attributes].freeze
     TOKEN = /\A[a-z][a-z0-9_]{0,63}\z/
     MAX_FIELDS = 8
+    REQUIRED_FIELD_KEYS = %w[key source field type].freeze
+    FIELD_TYPES = %w[boolean enum].freeze
 
     def self.validate!(config)
       new(config)
@@ -20,6 +22,8 @@ module Followups
       validate!
     end
 
+    # Validate the closed typed source allowlist and every selected value before exposing minimized CRM context.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def call(conversation:)
       result = {}
       result['stage'] = @config['stage_key'] if @config.key?('stage_key')
@@ -32,6 +36,7 @@ module Followups
 
         attributes ||= {}
         next unless attributes.key?(selection['field'])
+
         value = attributes[selection['field']]
         next if value.nil?
 
@@ -46,6 +51,7 @@ module Followups
       end
       result
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     private
 
@@ -53,6 +59,8 @@ module Followups
       value.is_a?(String) && TOKEN.match?(value)
     end
 
+    # Validate the closed typed source allowlist and every selected value before exposing minimized CRM context.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def validate!
       invalid! unless @config.is_a?(Hash) && (@config.keys - %w[stage_key fields]).empty?
       invalid! if @config.key?('stage_key') && !token?(@config['stage_key'])
@@ -61,19 +69,22 @@ module Followups
       keys = []
       fields.each do |field|
         invalid! unless field.is_a?(Hash) && (field.keys - %w[key source field type allowed_values]).empty?
-        invalid! unless %w[key source field type].all? { |key| field.key?(key) }
+        invalid! unless REQUIRED_FIELD_KEYS.all? { |key| field.key?(key) }
         invalid! unless token?(field['key']) && field['key'] != 'stage' && token?(field['field'])
-        invalid! unless SOURCES.include?(field['source']) && %w[boolean enum].include?(field['type'])
+        invalid! unless SOURCES.include?(field['source']) && FIELD_TYPES.include?(field['type'])
         if field['type'] == 'enum'
           values = field['allowed_values']
-          invalid! unless values.is_a?(Array) && values.size.between?(1, 16) && values.uniq.size == values.size && values.all? { |value| token?(value) }
-        else
-          invalid! if field.key?('allowed_values')
+          invalid! unless values.is_a?(Array) && values.size.between?(1, 16) && values.uniq.size == values.size && values.all? do |value|
+            token?(value)
+          end
+        elsif field.key?('allowed_values')
+          invalid!
         end
         keys << field['key']
       end
       invalid! unless keys.uniq.length == keys.length
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     def invalid!
       raise Invalid, 'invalid_snapshot_context'

@@ -50,7 +50,8 @@ RSpec.describe BotRuntime::DelegationService do
   def attachment(file_type:, **opts)
     url = opts.fetch(:url, 'https://crm.example.com/rails/active_storage/blobs/proxy/photo.png')
     blob = instance_double(ActiveStorage::Blob, content_type: opts.fetch(:content_type, 'image/png'))
-    file = double('ActiveStorage::Attached::One', attached?: opts.fetch(:attached, true), blob: blob)
+    # ActiveStorage delegates blob dynamically; preserve this existing reflection-tested adapter fixture.
+    file = double('ActiveStorage::Attached::One', attached?: opts.fetch(:attached, true), blob: blob) # rubocop:disable RSpec/VerifiedDoubles
     # Outbound media URL (ACTIVE_STORAGE_URL host + 15min TTL), not the permanent
     # browser-facing Attachment#download_url — the bot_runtime fetches it server-side.
     allow(BlobUrlOptions).to receive(:outbound_media_url).with(blob).and_return(url)
@@ -195,8 +196,8 @@ RSpec.describe BotRuntime::DelegationService do
       expect(service.send(:build_message_event)[:attachments]).to eq([])
     end
   end
-  describe 'delivery snapshot' do
 
+  describe 'delivery snapshot' do
     it 'includes only confirmed public outgoing messages from this conversation' do
       delivered = instance_double(Message, id: 'sent-1', content: 'Opção já enviada')
       expect(messages_relation).to receive(:where).with(message_type: :outgoing, private: false).and_return(messages_relation)

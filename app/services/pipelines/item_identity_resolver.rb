@@ -21,7 +21,8 @@ class Pipelines::ItemIdentityResolver
 
   # Only the legacy conversation actions accept conversation UUID/public number
   # aliases. Ordinary card updates keep their card-UUID-only contract.
-  def item(identifier, allow_conversation: false)
+  # Keep contact/conversation identity resolution as one fail-closed boundary.
+  def item(identifier, allow_conversation: false) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     card = @pipeline.pipeline_items.find_by(id: identifier) if uuid?(identifier)
     return card unless allow_conversation
 
@@ -29,9 +30,7 @@ class Pipelines::ItemIdentityResolver
     return card unless target
 
     conversation_card = unique_item(@pipeline.pipeline_items.where(conversation_id: target.id))
-    if card && (card.conversation_id != target.id || (conversation_card && card.id != conversation_card.id))
-      raise AmbiguousIdentity
-    end
+    raise AmbiguousIdentity if card && (card.conversation_id != target.id || (conversation_card && card.id != conversation_card.id))
 
     card || conversation_card
   end

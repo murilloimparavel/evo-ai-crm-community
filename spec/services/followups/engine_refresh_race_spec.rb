@@ -3,7 +3,10 @@ require 'database_cleaner/active_record'
 require 'timeout'
 require_relative '../../support/followup_engine_fixtures'
 
+# This integration scenario spans the scheduler, classifier, evidence and dispatch contracts.
+# rubocop:disable RSpec/DescribeClass
 RSpec.describe 'Followup refresh racing with incoming' do
+  # rubocop:enable RSpec/DescribeClass
   include FollowupEngineFixtures
   self.use_transactional_tests = false
 
@@ -16,10 +19,12 @@ RSpec.describe 'Followup refresh racing with incoming' do
   before do
     travel_to Time.utc(2026, 11, 2, 15)
     allow(SendReplyJob).to receive(:perform_later)
-    allow(Followups::DebouncedClassificationJob).to receive_message_chain(:set, :perform_later)
+    scheduled = instance_double(ActiveJob::ConfiguredJob, perform_later: nil)
+    allow(Followups::DebouncedClassificationJob).to receive(:set).and_return(scheduled)
   end
-  after { travel_back }
 
+  # Keep the complete multi-record integration scenario and its atomic safety assertions together.
+  # rubocop:disable RSpec/ExampleLength
   it 'does not overwrite the new source or deadline with the source captured by refresh' do
     business = build_followup_business
     captured = Queue.new
@@ -39,8 +44,8 @@ RSpec.describe 'Followup refresh racing with incoming' do
       ActiveRecord::Base.connection_pool.with_connection do
         Thread.current[:followup_refresh_probe] = true
         Followups::DebounceCoordinator.refresh!(conversation: Conversation.find(business[:conversation].id), reason: 'policy_changed')
-      rescue StandardError => error
-        errors << error
+      rescue StandardError => e
+        errors << e
       end
     end
     Timeout.timeout(5) { captured.pop }
@@ -50,8 +55,8 @@ RSpec.describe 'Followup refresh racing with incoming' do
         conversation = Conversation.find(business[:conversation].id)
         message = conversation.messages.create!(inbox_id: business[:inbox].id, message_type: :incoming, content: 'New message during refresh')
         result << message.id
-      rescue StandardError => error
-        errors << error
+      rescue StandardError => e
+        errors << e
       end
     end
     Timeout.timeout(5) { started.pop }
@@ -59,6 +64,7 @@ RSpec.describe 'Followup refresh racing with incoming' do
     expect(refresh.join(5)).not_to be_nil
     expect(incoming.join(5)).not_to be_nil
     raise errors.pop unless errors.empty?
+
     id = result.pop
     state = FollowupConversationState.find_by!(conversation_id: business[:conversation].id)
     expect(state.latest_incoming_message_id).to eq(id)
@@ -69,4 +75,5 @@ RSpec.describe 'Followup refresh racing with incoming' do
     refresh&.join(5)
     incoming&.join(5)
   end
+  # rubocop:enable RSpec/ExampleLength
 end

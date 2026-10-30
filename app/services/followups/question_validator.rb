@@ -8,6 +8,7 @@ module Followups
     class Invalid < StandardError; end
     MAX_QUESTIONS = 12
     MAX_BYTES = 12 * 1024
+    QUESTION_TYPES = %w[choice noul score].freeze
     KEY = /\A[a-z][a-z0-9_]{0,63}\z/
 
     def self.probability?(value)
@@ -18,6 +19,8 @@ module Followups
       new.call(questions)
     end
 
+    # Validate the complete bounded typed question contract before compiling any provider payload.
+    # rubocop:disable Metrics/AbcSize, Metrics/BlockLength, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def call(questions)
       invalid! unless questions.is_a?(Hash) && questions.size.between?(1, MAX_QUESTIONS)
       invalid! if JSON.generate(questions).bytesize > MAX_BYTES
@@ -25,7 +28,7 @@ module Followups
         invalid! unless id.is_a?(String) && KEY.match?(id) && original.is_a?(Hash)
         question = original.stringify_keys
         invalid! unless (question.keys - %w[type instructions criteria min_confidence yes_threshold no_threshold]).empty?
-        invalid! unless %w[choice noul score].include?(question['type'])
+        invalid! unless QUESTION_TYPES.include?(question['type'])
         description!(question['instructions'])
         criteria = question['criteria']
         if question['type'] == 'score'
@@ -33,7 +36,10 @@ module Followups
           criteria.each { |value| description!(value) }
         else
           invalid! unless criteria.is_a?(Hash)
-          criteria.each { |key, value| invalid! unless key.is_a?(String); description!(value) }
+          criteria.each do |key, value|
+            invalid! unless key.is_a?(String)
+            description!(value)
+          end
         end
         if question['type'] == 'choice'
           invalid! unless criteria.size.between?(2, 32) && criteria.key?('unclear')
@@ -54,22 +60,29 @@ module Followups
     rescue JSON::GeneratorError, SystemStackError
       invalid!
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/BlockLength, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     private
 
+    # Validate the complete bounded typed question contract before compiling any provider payload.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     def description!(value, depth = 0)
       invalid! if depth > 4
       case value
       when String then invalid! if value.strip.empty? || !value.valid_encoding? || value.length > 2000
       when Hash
         invalid! if value.empty? || value.size > 16
-        value.each { |key, item| invalid! unless key.is_a?(String); description!(item, depth + 1) }
+        value.each do |key, item|
+          invalid! unless key.is_a?(String)
+          description!(item, depth + 1)
+        end
       when Array
         invalid! if value.empty? || value.size > 16
         value.each { |item| description!(item, depth + 1) }
       else invalid!
       end
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
     def invalid!
       raise Invalid, 'invalid_question_pack'

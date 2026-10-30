@@ -16,9 +16,13 @@ class FollowupCampaign < ApplicationRecord
 
   scope :running, -> { where(enabled: true, mode: %w[shadow pilot active]) }
 
+  # Retain the full campaign activation checklist, including overlap and validity checks.
+  # rubocop:disable Metrics/CyclomaticComplexity
   def running?(now = Time.current)
-    enabled? && mode != 'off' && pipeline_stage_id.present? && inbox_id.present? && active_from.present? && active_from <= now && (expires_at.nil? || expires_at > now)
+    enabled? && mode != 'off' && pipeline_stage_id.present? && inbox_id.present? && active_from.present? &&
+      active_from <= now && (expires_at.nil? || expires_at > now)
   end
+  # rubocop:enable Metrics/CyclomaticComplexity
 
   def policy_object
     Followups::Policy.new(policy)
@@ -47,9 +51,9 @@ class FollowupCampaign < ApplicationRecord
 
     errors.add(:policy_version, 'must change with policy data') unless will_save_change_to_policy_version?
     previous_salt = policy_in_database.to_h.dig('cohort', 'salt')
-    if previous_salt.present? && previous_salt != policy.to_h.dig('cohort', 'salt')
-      errors.add(:policy, 'cohort salt is immutable for stable contact allocation')
-    end
+    return unless previous_salt.present? && previous_salt != policy.to_h.dig('cohort', 'salt')
+
+    errors.add(:policy, 'cohort salt is immutable for stable contact allocation')
   end
 
   def validate_policy
@@ -59,12 +63,16 @@ class FollowupCampaign < ApplicationRecord
     policy_object.errors.each { |error| errors.add(:policy, error) }
   end
 
+  # Retain the full campaign activation checklist, including overlap and validity checks.
+  # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def validate_activation
     return unless enabled? && mode != 'off'
 
     errors.add(:active_from, 'is required for activation') unless active_from
     errors.add(:expires_at, 'must follow activation') if expires_at && active_from && expires_at <= active_from
     errors.add(:base, 'legacy inactivity overlaps this target') if Followups::Eligibility.legacy_overlap?(self)
-    errors.add(:base, 'another campaign already targets this inbox and stage') if self.class.where(enabled: true, pipeline_stage_id: pipeline_stage_id, inbox_id: inbox_id).where.not(id: id).exists?
+    overlapping = self.class.where(enabled: true, pipeline_stage_id: pipeline_stage_id, inbox_id: inbox_id).where.not(id: id)
+    errors.add(:base, 'another campaign already targets this inbox and stage') if overlapping.exists?
   end
+  # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 end

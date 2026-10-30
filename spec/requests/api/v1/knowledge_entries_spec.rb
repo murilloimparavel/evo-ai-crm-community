@@ -4,7 +4,7 @@ RSpec.describe 'Knowledge entries API', type: :request do
   let(:headers) { { 'X-Service-Token' => 'knowledge-spec-token' } }
 
   around do |example|
-    previous = ENV['EVOAI_CRM_API_TOKEN']
+    previous = ENV.fetch('EVOAI_CRM_API_TOKEN', nil)
     ENV['EVOAI_CRM_API_TOKEN'] = 'knowledge-spec-token'
     example.run
   ensure

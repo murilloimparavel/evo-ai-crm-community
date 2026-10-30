@@ -16,14 +16,23 @@ RSpec.describe Followups::Templates do
   end
 
   it 'fails closed when a previously approved body changes' do
+    # Inject persisted stale test state without callbacks so the safety rejection is exercised.
+    # rubocop:disable Rails/SkipsModelValidations
     template.update_columns(body: 'Unreviewed change')
+    # rubocop:enable Rails/SkipsModelValidations
     expect(described_class.fetch(template.id)).to be_nil
   end
 
   it 'fails closed for an inactive or unapproved version' do
+    # Inject persisted stale test state without callbacks so the safety rejection is exercised.
+    # rubocop:disable Rails/SkipsModelValidations
     template.update_columns(active: false)
+    # rubocop:enable Rails/SkipsModelValidations
     expect(described_class.fetch(template.id)).to be_nil
+    # Inject persisted stale test state without callbacks so the safety rejection is exercised.
+    # rubocop:disable Rails/SkipsModelValidations
     template.update_columns(active: true, approved_by_id: nil)
+    # rubocop:enable Rails/SkipsModelValidations
     expect(described_class.fetch(template.id)).to be_nil
   end
 end

@@ -1,36 +1,46 @@
 require 'rails_helper'
 require_relative '../../support/followup_engine_fixtures'
 
+# This integration scenario spans the scheduler, classifier, evidence and dispatch contracts.
+# rubocop:disable RSpec/DescribeClass
 RSpec.describe 'Native CRM deletion with followup history' do
+  # rubocop:enable RSpec/DescribeClass
   include FollowupEngineFixtures
   before do
     travel_to Time.utc(2026, 11, 2, 15)
     allow(SendReplyJob).to receive(:perform_later)
   end
-  after { travel_back }
 
   def classification(business)
     state = FollowupConversationState.for!(business[:conversation])
-    FollowupClassification.create!(followup_campaign: business[:campaign], conversation: business[:conversation], source_incoming_message_id: business[:incoming].id, generation: state.classification_generation, revision: state.revision, policy_version: 'v1', model: 'jev-1.14.0', question_version: 'synthetic-v1', expires_at: 10.minutes.from_now)
+    FollowupClassification.create!(followup_campaign: business[:campaign], conversation: business[:conversation],
+                                   source_incoming_message_id: business[:incoming].id,
+                                   generation: state.classification_generation, revision: state.revision,
+                                   policy_version: 'v1', model: 'jev-1.14.0', question_version: 'synthetic-v1', expires_at: 10.minutes.from_now)
   end
 
   def reserve_unknown_cost(business)
     offline_followup_budget.reserve!(subject: business[:execution], campaign: business[:campaign])
   end
 
+  # Keep the complete multi-record integration scenario and its atomic safety assertions together.
+  # rubocop:disable RSpec/MultipleExpectations
   it 'deletes an existing card while preserving its evidence, execution and unknown billing' do
     business = build_followup_business
     reservation = reserve_unknown_cost(business)
     expect { business[:item].destroy! }.not_to raise_error
     expect(business[:execution].reload.pipeline_item_id).to be_nil
     expect(business[:evidence].reload.pipeline_item_id).to be_nil
-    expect(FollowupExecution.exists?(business[:execution].id)).to eq(true)
+    expect(FollowupExecution.exists?(business[:execution].id)).to be(true)
     expect(FollowupBudgetReservation.find(reservation.id).status).to eq('reserved')
     expect(reservation.followup_budget_day.reload.reserved_usd).to eq(reservation.reserved_usd)
     expect { Followups::EvaluateJob.perform_now(business[:execution].id) }.not_to raise_error
     expect(business[:execution].reload.status).to eq('cancelled')
   end
+  # rubocop:enable RSpec/MultipleExpectations
 
+  # Keep the complete multi-record integration scenario and its atomic safety assertions together.
+  # rubocop:disable RSpec/MultipleExpectations
   it 'deletes conversation runtime state, nulls historical links and leaves queued jobs harmless' do
     business = build_followup_business
     row = classification(business)
@@ -45,8 +55,9 @@ RSpec.describe 'Native CRM deletion with followup history' do
     expect(business[:evidence].reload.conversation_id).to be_nil
     expect { Followups::ClassificationRetryJob.perform_now(row.id) }.not_to raise_error
     expect { Followups::SchedulerJob.perform_now }.not_to raise_error
-    expect(FollowupBudgetReservation.exists?(reservation.id)).to eq(true)
+    expect(FollowupBudgetReservation.exists?(reservation.id)).to be(true)
   end
+  # rubocop:enable RSpec/MultipleExpectations
 
   it 'deletes a public anchor without deleting the ledger or allowing evaluation' do
     business = build_followup_business
@@ -54,11 +65,11 @@ RSpec.describe 'Native CRM deletion with followup history' do
     expect { business[:anchor].destroy! }.not_to raise_error
     expect(business[:evidence].reload.anchor_message_id).to be_nil
     expect(business[:execution].reload.quote_anchor_message_id).to be_nil
-    classifier = double('must not classify')
+    classifier = instance_double(Followups::Classifier)
     expect(classifier).not_to receive(:classify)
     evaluate_followup(business, classifier: classifier)
     expect(business[:execution].reload.status).to eq('cancelled')
-    expect(FollowupBudgetReservation.exists?(reservation.id)).to eq(true)
+    expect(FollowupBudgetReservation.exists?(reservation.id)).to be(true)
   end
 
   it 'deletes an incoming source and safely retires its classification and debounce deadline' do
@@ -83,7 +94,7 @@ RSpec.describe 'Native CRM deletion with followup history' do
     expect(business[:execution].reload.message_id).to be_nil
     expect { Followups::ReconcileJob.perform_now }.not_to change(Message, :count)
     expect(business[:execution].reload.status).to eq('cancelled')
-    expect(business[:campaign].reload.enabled).to eq(true)
+    expect(business[:campaign].reload.enabled).to be(true)
   end
 
   it 'quarantines dispatch in progress after target deletion and guards the shared sender' do
@@ -96,7 +107,7 @@ RSpec.describe 'Native CRM deletion with followup history' do
     expect { SendReplyJob.perform_now(message.id) }.not_to raise_error
     Followups::ReconcileJob.perform_now
     expect(business[:execution].reload.status).to eq('delivery_unknown')
-    expect(business[:campaign].reload.enabled).to eq(true)
-    expect(Followups::DispatchGuard.preflight(claim: claim, message: message)).to eq(false)
+    expect(business[:campaign].reload.enabled).to be(true)
+    expect(Followups::DispatchGuard.preflight(claim: claim, message: message)).to be(false)
   end
 end

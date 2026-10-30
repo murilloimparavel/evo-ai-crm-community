@@ -5,9 +5,9 @@ require 'rails_helper'
 # Every AI feature is registered here, and the
 # resolver reads this map instead of each consumer carrying its own rule.
 RSpec.describe Ai::ConsumerCompatibility do
-  it 'registers the five AI features of the CRM' do
+  it 'registers the six AI features of the CRM' do
     expect(described_class::CONSUMERS.keys).to contain_exactly(
-      :ai_agents, :inbox_assist, :audio_transcription, :label_suggestion, :moderation
+      :ai_agents, :inbox_assist, :audio_transcription, :label_suggestion, :moderation, :pipeline_classification
     )
   end
 
@@ -39,6 +39,11 @@ RSpec.describe Ai::ConsumerCompatibility do
       expect(described_class.accepts?(:label_suggestion, provider)).to be(false)
       expect(described_class.accepts?(:moderation, provider)).to be(false)
     end
+  end
+
+  it 'restricts pipeline classification to the approved OpenRouter transport' do
+    expect(described_class.accepted_providers(:pipeline_classification)).to eq(['openrouter'])
+    expect(described_class.accepts?(:pipeline_classification, 'openai')).to be(false)
   end
 
   it 'rejects an unknown consumer instead of guessing' do

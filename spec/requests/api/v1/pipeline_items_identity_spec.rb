@@ -14,13 +14,25 @@ RSpec.describe 'Pipeline item identity on writes', type: :request do
 
   before do
     probe = user
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
     allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
+      # rubocop:enable RSpec/AnyInstance
       Current.user = probe
       Current.evo_permission_cache ||= {}
     end
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
     allow_any_instance_of(PipelinePolicy).to receive(:view?).and_return(true)
+    # rubocop:enable RSpec/AnyInstance
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
     allow_any_instance_of(PipelinePolicy).to receive(:update?).and_return(true)
+    # rubocop:enable RSpec/AnyInstance
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
     allow_any_instance_of(PipelinePolicy).to receive(:update_items?).and_return(true)
+    # rubocop:enable RSpec/AnyInstance
   end
 
   after { Current.reset }
@@ -190,7 +202,10 @@ RSpec.describe 'Pipeline item identity on writes', type: :request do
     it 'does not move an exact UUID target when card-write permission is denied' do
       conversation = build_conversation(id: '2a000000-0000-4000-8000-000000000006')
       card = build_card(conversation)
+      # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+      # rubocop:disable RSpec/AnyInstance
       allow_any_instance_of(PipelinePolicy).to receive(:update_items?).and_return(false)
+      # rubocop:enable RSpec/AnyInstance
 
       move(conversation.id)
 
@@ -275,6 +290,7 @@ RSpec.describe 'Pipeline item identity on writes', type: :request do
   end
 
   describe 'conversation create and relocate endpoints' do
+    invalid_identifiers = %w[2garbage 2a000000-0000-4000-8000-000000009999 2147483648]
     [:create_card, :relocate].each do |write|
       it "#{write} resolves the UUID before considering any numeric namespace" do
         conversation = build_conversation(id: '2a000000-0000-4000-8000-000000000003')
@@ -298,7 +314,7 @@ RSpec.describe 'Pipeline item identity on writes', type: :request do
         expect_unrelated_untouched
       end
 
-      %w[2garbage 2a000000-0000-4000-8000-000000009999 2147483648].each do |identifier|
+      invalid_identifiers.each do |identifier|
         it "#{write} rejects #{identifier.inspect} without changing another conversation" do
           expect { send(write, identifier) }.not_to change(PipelineItem, :count)
 
@@ -348,7 +364,7 @@ RSpec.describe 'Pipeline item identity on writes', type: :request do
 
     it 'rejects ambiguous source placements across pipelines rather than choosing the first' do
       conversation = build_conversation
-      cards = 2.times.map do |index|
+      cards = Array.new(2) do |index|
         other = Pipeline.create!(name: "Source #{index}", pipeline_type: 'sales', created_by: user)
         stage = other.pipeline_stages.create!(name: 'Held', position: 1)
         PipelineItem.create!(pipeline: other, pipeline_stage: stage, conversation: conversation)

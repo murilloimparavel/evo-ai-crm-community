@@ -8,18 +8,34 @@ RSpec.describe 'Followup anchor evidence API', type: :request do
   before do
     allow(SendReplyJob).to receive(:perform_later)
     operator = business[:user]
-    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
+    allow_any_instance_of(Api::V1::FollowupEvidencesController).to receive(:authenticate_request!) do
+      # rubocop:enable RSpec/AnyInstance
       Current.user = operator
       Current.service_authenticated = false
     end
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
     allow_any_instance_of(PipelinePolicy).to receive(:update_items?).and_return(true)
+    # rubocop:enable RSpec/AnyInstance
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
+    allow_any_instance_of(Api::V1::FollowupEvidencesController).to receive(:has_user_permission?)
+      # rubocop:enable RSpec/AnyInstance
+      .with(operator.id, 'pipeline_items.update').and_return(true)
   end
+
   after { Current.reset }
 
   def parameters
-    { campaign_id: business[:campaign].id, conversation_id: business[:conversation].id, pipeline_item_id: business[:item].id, source_incoming_message_id: business[:incoming].id, anchor_message_id: business[:anchor].id, anchor_digest: Followups::EvidenceApproval.digest(business[:anchor]) }
+    { campaign_id: business[:campaign].id, conversation_id: business[:conversation].id, pipeline_item_id: business[:item].id,
+      source_incoming_message_id: business[:incoming].id, anchor_message_id: business[:anchor].id,
+      anchor_digest: Followups::EvidenceApproval.digest(business[:anchor]) }
   end
 
+  # Keep the complete multi-record integration scenario and its atomic safety assertions together.
+  # rubocop:disable RSpec/MultipleExpectations
   it 'previews exact identity and writes only metadata without taking over the conversation' do
     get '/api/v1/followup_evidences/preview', params: parameters
     expect(response).to have_http_status(:ok)
@@ -31,10 +47,14 @@ RSpec.describe 'Followup anchor evidence API', type: :request do
     expect(business[:conversation].team_id).to be_nil
     expect(business[:item].reload.pipeline_stage_id).to eq(business[:stage].id)
   end
+  # rubocop:enable RSpec/MultipleExpectations
 
   it 'rejects generic service tokens even if they otherwise bypass pipeline authorization' do
     operator = business[:user]
-    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
+    allow_any_instance_of(Api::V1::FollowupEvidencesController).to receive(:authenticate_request!) do
+      # rubocop:enable RSpec/AnyInstance
       Current.user = operator
       Current.service_authenticated = true
     end
@@ -43,10 +63,27 @@ RSpec.describe 'Followup anchor evidence API', type: :request do
   end
 
   it 'enforces existing pipeline write permission' do
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
     allow_any_instance_of(PipelinePolicy).to receive(:update_items?).and_return(false)
+    # rubocop:enable RSpec/AnyInstance
     post '/api/v1/followup_evidences', params: parameters, as: :json
     # The existing application exception wrapper maps Pundit denial to 401.
     expect(response).to have_http_status(:unauthorized)
+  end
+
+  it 'rejects preview and approval without the existing card write permission' do
+    # Rails constructs these request boundaries internally; isolate authentication/association reads at that boundary.
+    # rubocop:disable RSpec/AnyInstance
+    allow_any_instance_of(Api::V1::FollowupEvidencesController).to receive(:has_user_permission?)
+      # rubocop:enable RSpec/AnyInstance
+      .with(business[:user].id, 'pipeline_items.update').and_return(false)
+    get '/api/v1/followup_evidences/preview', params: parameters
+    expect(response).to have_http_status(:forbidden)
+    expect do
+      post '/api/v1/followup_evidences', params: parameters, as: :json
+    end.not_to change(FollowupAnchorEvidence, :count)
+    expect(response).to have_http_status(:forbidden)
   end
 
   it 'rejects changed content since operator preview' do

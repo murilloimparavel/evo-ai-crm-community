@@ -13,6 +13,7 @@ class Base::SendOnChannelService
   def perform
     validate_target_channel
     return unless outgoing_message?
+
     if Followups::DispatchProtection.managed?(message)
       return Followups::DispatchProtection.perform(message: message) do
         perform_reply unless invalid_message?

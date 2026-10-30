@@ -5,25 +5,37 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
   let!(:pipeline) { Pipeline.create!(name: "Catalog API #{SecureRandom.hex(5)}", created_by: user) }
   let!(:stage) { PipelineStage.create!(pipeline: pipeline, name: 'Considering', position: 1) }
   let(:url) { "/api/v1/pipelines/#{pipeline.id}/classification_catalog" }
+  let(:service_request) { false }
   let(:allowed_permissions) { %w[pipelines.read pipelines.update] }
 
   before do
     operator = user
     permissions = allowed_permissions
-    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) { Current.user = operator }
-    allow_any_instance_of(Api::BaseController).to receive(:has_user_permission?) { |_instance, _user_id, permission| permissions.include?(permission) }
-    allow_any_instance_of(User).to receive(:has_permission?) { |_instance, permission| permissions.include?(permission) }
-    allow_any_instance_of(User).to receive(:administrator?).and_return(false)
+    allow(Api::V1::PipelineClassificationCatalogsController).to receive(:new).and_wrap_original do |original, *args|
+      controller = original.call(*args)
+      allow(controller).to receive(:authenticate_request!) do
+        Current.user = service_request ? nil : operator
+        Current.service_authenticated = true if service_request
+      end
+      allow(controller).to receive(:has_user_permission?) { |_user_id, permission| permissions.include?(permission) }
+      controller
+    end
+    allow(user).to receive(:has_permission?) { |permission| permissions.include?(permission) }
+    allow(user).to receive(:administrator?).and_return(false)
   end
+
   after { Current.reset }
 
   def body
-    JSON.parse(response.body)
+    response.parsed_body
   end
 
   def payload
+    profile = PipelineClassification::Catalog::DEFAULT_STAGE.deep_dup.merge(
+      'classification_enabled' => true, 'definition' => 'Customer considers offers'
+    )
     { classification: PipelineClassification::Catalog::DEFAULT_PROFILE.deep_dup.merge('purpose' => 'Determine customer journey'),
-      stages: [{ id: stage.id, classification_profile: PipelineClassification::Catalog::DEFAULT_STAGE.deep_dup.merge('classification_enabled' => true, 'definition' => 'Customer considers offers') }],
+      stages: [{ id: stage.id, classification_profile: profile }],
       expected_hash: PipelineClassification::Catalog.new(pipeline.reload).hash }
   end
 
@@ -32,7 +44,7 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
     expect(response).to have_http_status(:ok)
     expect(body.dig('data', 'classification', 'enabled')).to be(false)
     expect(body.dig('data', 'stages', 0, 'classification_profile', 'entry_criteria')).to eq([])
-    expect(response.headers['ETag']).to eq(%Q("#{body.dig('data', 'draft_hash')}"))
+    expect(response.headers['ETag']).to eq(%("#{body.dig('data', 'draft_hash')}"))
     expect(body.dig('data', 'credential_status').keys).to contain_exactly('provider', 'configured')
     expect(body.to_json).not_to include('api_key', 'Authorization')
   end
@@ -49,7 +61,7 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
   it 'accepts If-Match for edits and validates malformed profile with 422' do
     attrs = payload
     expected = attrs.delete(:expected_hash)
-    patch url, params: attrs, headers: { 'If-Match' => %Q("#{expected}") }, as: :json
+    patch url, params: attrs, headers: { 'If-Match' => %("#{expected}") }, as: :json
     expect(response).to have_http_status(:ok)
     attrs[:classification]['unknown_tool'] = 'execute'
     attrs[:expected_hash] = PipelineClassification::Catalog.new(pipeline.reload).hash
@@ -67,7 +79,8 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
     expect(stage.reload.classification_profile).to eq({})
   end
 
-  it 'publishes a reviewed OFF revision and exposes a readonly approved projection' do
+  # Keep the complete approval/race lifecycle and its observable side effects in one regression example.
+  it 'publishes a reviewed OFF revision and exposes a readonly approved projection' do # rubocop:disable RSpec/MultipleExpectations
     patch url, params: payload, as: :json
     expected = body.dig('data', 'draft_hash')
     post "#{url}/publish", params: { expected_hash: expected }, as: :json
@@ -83,7 +96,9 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
   end
 
   context 'with card movement permission only' do
+    let(:service_request) { false }
     let(:allowed_permissions) { %w[pipelines.read pipeline_items.update] }
+
     it 'permits reading but rejects saving, previewing and approving criteria' do
       get url
       expect(response).to have_http_status(:ok)
@@ -106,19 +121,14 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
   end
 
   it 'refuses runtime service tokens for writes' do
-    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
-      Current.user = nil
-      Current.service_authenticated = true
-    end
+    allow(self).to receive(:service_request).and_return(true)
     patch url, params: payload, as: :json
     expect(response).to have_http_status(:forbidden)
     expect(body['error']).to eq('human_operator_required')
   end
+
   it 'permits the existing authenticated CRM service read contract for projections only' do
-    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do
-      Current.user = nil
-      Current.service_authenticated = true
-    end
+    allow(self).to receive(:service_request).and_return(true)
     get "#{url}/projection"
     expect(response).to have_http_status(:ok)
     expect(body.dig('data', 'source')).to eq('legacy')
@@ -127,13 +137,15 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
-  it 'exposes independent legacy references for review without importing them or changing the catalog hash' do
+  # Keep the complete approval/race lifecycle and its observable side effects in one regression example.
+  it 'exposes independent legacy references for review without importing them or changing the catalog hash' do # rubocop:disable RSpec/ExampleLength, RSpec/MultipleExpectations
     get url
     original_hash = body.dig('data', 'draft_hash')
     pipeline.update!(description: 'Previous human purpose')
     stage.update!(automation_rules: { 'description' => 'Previous human stage criteria', 'rules' => [] })
     get url
-    reference = { 'pipeline_description' => 'Previous human purpose', 'stages' => [{ 'id' => stage.id, 'description' => 'Previous human stage criteria' }] }
+    reference = { 'pipeline_description' => 'Previous human purpose',
+                  'stages' => [{ 'id' => stage.id, 'description' => 'Previous human stage criteria' }] }
     expect(body.dig('data', 'legacy_reference')).to eq(reference)
     expect(body.dig('data', 'draft_hash')).to eq(original_hash)
     expect(body.dig('data', 'classification', 'purpose')).to eq('')
@@ -158,5 +170,4 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
     expect(body.fetch('data')).not_to have_key('legacy_reference')
     expect(body.fetch('data').to_json).not_to include('Previous human purpose', 'Updated legacy reference')
   end
-
 end

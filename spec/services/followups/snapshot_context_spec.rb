@@ -6,7 +6,8 @@ require_relative '../../../app/services/followups/snapshot_context'
 RSpec.describe Followups::SnapshotContext do
   let(:config) do
     { 'stage_key' => 'estimate_offer', 'fields' => [
-      { 'key' => 'service_kind', 'source' => 'conversation.custom_attributes', 'field' => 'service_kind', 'type' => 'enum', 'allowed_values' => %w[repair installation] },
+      { 'key' => 'service_kind', 'source' => 'conversation.custom_attributes', 'field' => 'service_kind', 'type' => 'enum',
+        'allowed_values' => %w[repair installation] },
       { 'key' => 'needs_callback', 'source' => 'contact.custom_attributes', 'field' => 'callback_requested', 'type' => 'boolean' }
     ] }
   end
@@ -14,7 +15,8 @@ RSpec.describe Followups::SnapshotContext do
   let(:conversation) { Struct.new(:custom_attributes, :contact).new({ 'service_kind' => 'repair', 'private_note' => 'do not export' }, contact) }
 
   it 'exports only configured closed facts and a configured stage alias' do
-    expect(described_class.new(config).call(conversation: conversation)).to eq('stage' => 'estimate_offer', 'service_kind' => 'repair', 'needs_callback' => false)
+    expect(described_class.new(config).call(conversation: conversation)).to eq('stage' => 'estimate_offer', 'service_kind' => 'repair',
+                                                                               'needs_callback' => false)
   end
 
   it 'keeps absence and null distinct from an actual false value' do
@@ -22,7 +24,7 @@ RSpec.describe Followups::SnapshotContext do
     contact.custom_attributes['callback_requested'] = nil
     expect(described_class.new(config).call(conversation: conversation)).to eq('stage' => 'estimate_offer')
     contact.custom_attributes['callback_requested'] = false
-    expect(described_class.new(config).call(conversation: conversation)['needs_callback']).to eq(false)
+    expect(described_class.new(config).call(conversation: conversation)['needs_callback']).to be(false)
   end
 
   it 'rejects unapproved sources, nested paths, free text and unknown settings' do

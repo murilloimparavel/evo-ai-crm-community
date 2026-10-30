@@ -8,7 +8,7 @@ RSpec.describe SendReplyJob do
   let(:channel) { instance_double(Channel::Whatsapp) }
   let(:inbox) { instance_double(Inbox, channel: channel) }
   let(:conversation) { instance_double(Conversation, inbox: inbox) }
-  let(:message) { instance_double(Message, id: 42, conversation: conversation) }
+  let(:message) { instance_double(Message, id: 42, conversation: conversation, has_attribute?: true, followup_execution_id: nil) }
 
   before do
     allow(channel).to receive(:class).and_return(Channel::Whatsapp)

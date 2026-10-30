@@ -1,6 +1,7 @@
 class Api::V1::PipelineClassificationCatalogsController < Api::V1::BaseController
   wrap_parameters false
-  require_permissions({ show: 'pipelines.read', projection: 'pipelines.read', update: 'pipelines.update', preview: 'pipelines.update', publish: 'pipelines.update' })
+  require_permissions({ show: 'pipelines.read', projection: 'pipelines.read', update: 'pipelines.update', preview: 'pipelines.update',
+                        publish: 'pipelines.update' })
   before_action :human_operator!, except: [:projection]
   before_action :load_pipeline!
 
@@ -13,28 +14,28 @@ class Api::V1::PipelineClassificationCatalogsController < Api::V1::BaseControlle
     authorize @pipeline, :update?
     PipelineClassification::Editor.new(pipeline: @pipeline, actor: Current.user).save!(payload: catalog_payload, expected_hash: expected_hash)
     render_catalog
-  rescue PipelineClassification::Catalog::Conflict => error
-    render json: { error: error.message }, status: :conflict
-  rescue PipelineClassification::Catalog::Invalid, ActiveRecord::RecordInvalid => error
-    render json: { error: error.message }, status: :unprocessable_entity
+  rescue PipelineClassification::Catalog::Conflict => e
+    render json: { error: e.message }, status: :conflict
+  rescue PipelineClassification::Catalog::Invalid, ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def preview
     authorize @pipeline, :update?
     catalog = PipelineClassification::Catalog.new(@pipeline, payload: catalog_payload)
     success_response(data: { valid: true, compiled: catalog.compiled, draft_hash: catalog.hash, legacy_reference: catalog.legacy_reference })
-  rescue PipelineClassification::Catalog::Invalid => error
-    render json: { error: error.message }, status: :unprocessable_entity
+  rescue PipelineClassification::Catalog::Invalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def publish
     authorize @pipeline, :update?
     PipelineClassification::Editor.new(pipeline: @pipeline, actor: Current.user).publish!(expected_hash: expected_hash)
     render_catalog
-  rescue PipelineClassification::Catalog::Conflict => error
-    render json: { error: error.message }, status: :conflict
-  rescue PipelineClassification::Catalog::Invalid => error
-    render json: { error: error.message }, status: :unprocessable_entity
+  rescue PipelineClassification::Catalog::Conflict => e
+    render json: { error: e.message }, status: :conflict
+  rescue PipelineClassification::Catalog::Invalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def projection
@@ -49,10 +50,11 @@ class Api::V1::PipelineClassificationCatalogsController < Api::V1::BaseControlle
     if revision.nil? || !catalog.current?
       return success_response(data: { pipeline_id: @pipeline.id, source: revision ? 'catalog_v1' : 'legacy', available: false })
     end
-    response.headers['ETag'] = %Q("#{revision.catalog_hash}")
+
+    response.headers['ETag'] = %("#{revision.catalog_hash}")
     success_response(data: { pipeline_id: @pipeline.id, source: 'catalog_v1', available: true,
-      catalog_version: revision.catalog_version, catalog_hash: revision.catalog_hash,
-      purpose: revision.snapshot.dig('classification', 'purpose'), stages: revision.snapshot.fetch('stages') })
+                             catalog_version: revision.catalog_version, catalog_hash: revision.catalog_hash,
+                             purpose: revision.snapshot.dig('classification', 'purpose'), stages: revision.snapshot.fetch('stages') })
   end
 
   private
@@ -77,7 +79,7 @@ class Api::V1::PipelineClassificationCatalogsController < Api::V1::BaseControlle
   end
 
   def render_catalog
-    catalog = PipelineClassification::Catalog.new(@pipeline.reload)
+    PipelineClassification::Catalog.new(@pipeline.reload)
     status = if defined?(Ai::DecisionClient)
                Ai::DecisionClient.status
              else
@@ -85,7 +87,7 @@ class Api::V1::PipelineClassificationCatalogsController < Api::V1::BaseControlle
              end
     data = nil
     @pipeline.with_lock { data = PipelineClassification::Catalog.new(@pipeline).representation }
-    response.headers['ETag'] = %Q("#{data.fetch('draft_hash')}")
+    response.headers['ETag'] = %("#{data.fetch('draft_hash')}")
     success_response(data: data.merge('credential_status' => status))
   end
 end

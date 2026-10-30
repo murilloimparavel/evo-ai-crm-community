@@ -43,7 +43,8 @@ RSpec.describe Whatsapp::Providers::BaseService do
     end
 
     it 'does not retain a non-JSON provider body' do
-      response = instance_double(HTTParty::Response, success?: false, code: 503, parsed_response: '<html>private response</html>', body: '<html>private response</html>')
+      response = instance_double(HTTParty::Response, success?: false, code: 503, parsed_response: '<html>private response</html>',
+                                                     body: '<html>private response</html>')
 
       allow(Rails.logger).to receive(:error)
       service.send(:process_response, response)

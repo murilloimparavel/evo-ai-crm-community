@@ -3,7 +3,10 @@ require 'database_cleaner/active_record'
 require 'timeout'
 require_relative '../../support/followup_engine_fixtures'
 
+# This integration scenario spans the scheduler, classifier, evidence and dispatch contracts.
+# rubocop:disable RSpec/DescribeClass
 RSpec.describe 'Modular follow-up channel boundary' do
+  # rubocop:enable RSpec/DescribeClass
   include FollowupEngineFixtures
   self.use_transactional_tests = false
 
@@ -33,8 +36,6 @@ RSpec.describe 'Modular follow-up channel boundary' do
       end
     end)
   end
-
-  after { travel_back }
 
   def queued_business
     business = build_followup_business
@@ -79,13 +80,13 @@ RSpec.describe 'Modular follow-up channel boundary' do
     business = queued_business
     conversation = business[:conversation]
     previous_generation = FollowupConversationState.find_by!(conversation: conversation).classification_generation
-    messages = 3.times.map do |index|
+    messages = Array.new(3) do |index|
       conversation.messages.create!(inbox: business[:inbox], message_type: :incoming, content: "Message part #{index}")
     end
     state = FollowupConversationState.find_by!(conversation: conversation)
     expect(state.classification_generation).to eq(previous_generation + 3)
     expect(state.latest_incoming_message_id).to eq(messages.last.id)
-    expect(state.classification_due_at).to be_within(0.001).of(Time.current + 1.5.seconds)
+    expect(state.classification_due_at).to be_within(0.001).of(1.5.seconds.from_now)
     expect(business[:execution].reload.status).to eq('cancelled')
     SyntheticFollowupChannel.provider = ->(_) { raise 'must not reach provider' }
     expect { deliver(business[:execution].message) }.not_to raise_error
@@ -107,7 +108,7 @@ RSpec.describe 'Modular follow-up channel boundary' do
       policy['snapshot_context'] = {
         'stage_key' => 'options_shared',
         'fields' => [{ 'key' => 'needs_callback', 'source' => "#{kind}.custom_attributes",
-                      'field' => 'needs_callback', 'type' => 'boolean' }]
+                       'field' => 'needs_callback', 'type' => 'boolean' }]
       }
       business[:campaign].update!(policy: policy, policy_version: 'context-v2')
       business[:evidence] = Followups::EvidenceApproval.new(
@@ -120,7 +121,7 @@ RSpec.describe 'Modular follow-up channel boundary' do
       generation = state.classification_generation
       business[kind.to_sym].update!(custom_attributes: { 'needs_callback' => true })
       expect(state.reload.classification_generation).to eq(generation + 1)
-      expect(state.classification_due_at).to be_within(0.001).of(Time.current + 1.5.seconds)
+      expect(state.classification_due_at).to be_within(0.001).of(1.5.seconds.from_now)
       expect(business[:execution].reload.status).to eq('cancelled')
       SyntheticFollowupChannel.provider = ->(_) { raise 'must not reach provider' }
       expect { deliver(business[:execution].message) }.not_to raise_error
@@ -175,7 +176,7 @@ RSpec.describe 'Modular follow-up channel boundary' do
     message.update!(content_attributes: message.content_attributes.merge(
       'whatsapp_auto_retry_http_status' => 429, 'whatsapp_auto_retry_count' => 1
     ))
-    SyntheticFollowupChannel.provider = ->(_) { nil }
+    SyntheticFollowupChannel.provider = ->(_) {}
     deliver(message)
     expect(business[:execution].reload.status).to eq('delivery_unknown')
   end
@@ -185,7 +186,10 @@ RSpec.describe 'Modular follow-up channel boundary' do
     SyntheticFollowupChannel.provider = ->(_) { raise Timeout::Error }
     message = business[:execution].message
     expect { deliver(message) }.to raise_error(Timeout::Error)
+    # Inject persisted stale test state without callbacks so the safety rejection is exercised.
+    # rubocop:disable Rails/SkipsModelValidations
     message.update_columns(status: Message.statuses[:failed], source_id: 'synthetic-late-receipt')
+    # rubocop:enable Rails/SkipsModelValidations
     Messages::StatusUpdateService.new(message.reload, 'delivered').perform
     expect(business[:execution].reload.status).to eq('delivered')
     Messages::StatusUpdateService.new(message.reload, 'sent').perform
@@ -199,7 +203,7 @@ RSpec.describe 'Modular follow-up channel boundary' do
     deliver(message)
     expect(message.reload.source_id).to eq('synthetic-ordinary-id')
     message.update!(status: :failed)
-    expect(Messages::StatusUpdateService.new(message, 'delivered').perform).to eq(false)
+    expect(Messages::StatusUpdateService.new(message, 'delivered').perform).to be(false)
     expect(message.reload.status).to eq('failed')
   end
 
@@ -214,9 +218,9 @@ RSpec.describe 'Modular follow-up channel boundary' do
     PipelineItem.create!(pipeline: business[:pipeline], pipeline_stage: business[:stage], conversation: conversation)
     state.reload
     expect(state.latest_incoming_message_id).to eq(incoming.id)
-    expect(state.classification_due_at).to be_within(0.001).of(Time.current + 1.5.seconds)
+    expect(state.classification_due_at).to be_within(0.001).of(1.5.seconds.from_now)
     travel 2.seconds
-    evaluator = double(call: nil)
+    evaluator = instance_double(Followups::Evaluator, call: nil)
     factory = double
     expect(factory).to receive(:call).once.and_return(evaluator)
     rows = Followups::DebouncedClassifier.new(conversation: conversation, generation: state.classification_generation,
@@ -229,12 +233,15 @@ RSpec.describe 'Modular follow-up channel boundary' do
     business = queued_business
     other = build_followup_business(name: 'Repair workshop', timezone: 'Europe/Lisbon')
     message = business[:execution].message
+    # Inject persisted stale test state without callbacks so the safety rejection is exercised.
+    # rubocop:disable Rails/SkipsModelValidations
     message.update_columns(conversation_id: other[:conversation].id, inbox_id: other[:inbox].id)
+    # rubocop:enable Rails/SkipsModelValidations
     SyntheticFollowupChannel.provider = ->(_) { raise 'must not reach provider' }
     expect { deliver(message.reload) }.not_to raise_error
-    expect(business[:campaign].reload.enabled).to eq(false)
+    expect(business[:campaign].reload.enabled).to be(false)
     expect(business[:execution].reload.reason).to eq('incident_message_identity_mismatch')
-    expect(other[:campaign].reload.enabled).to eq(true)
+    expect(other[:campaign].reload.enabled).to be(true)
   end
 
   it 'quarantines conflicting provider references and stops only the affected campaign' do
@@ -242,8 +249,11 @@ RSpec.describe 'Modular follow-up channel boundary' do
     SyntheticFollowupChannel.provider = ->(_) { 'synthetic-first-reference' }
     message = business[:execution].message
     deliver(message)
+    # Inject persisted stale test state without callbacks so the safety rejection is exercised.
+    # rubocop:disable Rails/SkipsModelValidations
     message.update_columns(source_id: 'synthetic-conflicting-reference')
-    expect(Messages::StatusUpdateService.new(message.reload, 'delivered').perform).to eq(false)
+    # rubocop:enable Rails/SkipsModelValidations
+    expect(Messages::StatusUpdateService.new(message.reload, 'delivered').perform).to be(false)
     expect(business[:campaign].reload.mode).to eq('off')
     expect(business[:execution].reload.status).to eq('delivery_unknown')
     expect(business[:execution].reason).to eq('incident_provider_reference_conflict')
@@ -252,7 +262,10 @@ RSpec.describe 'Modular follow-up channel boundary' do
   it 'reconciles a provider reference persisted before a crash without sending again' do
     business = queued_business
     message = business[:execution].message
+    # Inject persisted stale test state without callbacks so the safety rejection is exercised.
+    # rubocop:disable Rails/SkipsModelValidations
     message.update_columns(source_id: 'synthetic-accepted-before-crash')
+    # rubocop:enable Rails/SkipsModelValidations
     SyntheticFollowupChannel.provider = ->(_) { raise 'must not reach provider' }
     expect { deliver(message.reload) }.not_to raise_error
     expect(business[:execution].reload.status).to eq('dispatched')

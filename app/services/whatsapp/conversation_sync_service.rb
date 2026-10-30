@@ -167,7 +167,7 @@ class Whatsapp::ConversationSyncService
           whatsapp_history_synced: true
         }
       }
-        ).perform
+    ).perform
 
     contact_inbox
   end

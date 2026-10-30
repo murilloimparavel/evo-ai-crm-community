@@ -1,7 +1,10 @@
 require 'rails_helper'
 require_relative '../../support/followup_engine_fixtures'
 
+# This integration scenario spans the scheduler, classifier, evidence and dispatch contracts.
+# rubocop:disable RSpec/DescribeClass
 RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
+  # rubocop:enable RSpec/DescribeClass
   include FollowupEngineFixtures
 
   before do
@@ -10,8 +13,9 @@ RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
     InstallationConfig.create!(name: 'FOLLOWUP_SETTINGS', value: { 'budget_timezone' => 'UTC', 'daily_usd' => 1.0, 'daily_conversations' => 20 })
     InstallationConfig.create!(name: 'PIPELINE_CLASSIFICATION_SETTINGS', value: { 'max_attempt_cost_usd' => 0.01 })
   end
-  after { travel_back }
 
+  # Keep the complete multi-record integration scenario and its atomic safety assertions together.
+  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
   def configured_business(classify: true)
     b = build_followup_business
     profile = PipelineClassification::Catalog::DEFAULT_PROFILE.deep_dup.merge(
@@ -29,9 +33,10 @@ RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
     row = PipelineClassification::DebouncedClassifier.new(state: state, generation: state.generation).call
     if classify
       response = { ok: true, model: PipelineClassification::Catalog::MODEL,
-        answers: { 'stage_candidate' => { 'type' => 'choice', 'choice' => 'stage_1', 'confidence' => 1.0, 'probabilities' => { 'stage_1' => 1.0, 'unclear' => 0.0, 'no_candidate' => 0.0 } } },
-        input_tokens: 100, usage_known: true, cost_known: true, cost_usd: 0.0000042 }
-      client = double('one offline pipeline decision', call: response)
+                   answers: { 'stage_candidate' => { 'type' => 'choice', 'choice' => 'stage_1', 'confidence' => 1.0,
+                                                     'probabilities' => { 'stage_1' => 1.0, 'unclear' => 0.0, 'no_candidate' => 0.0 } } },
+                   input_tokens: 100, usage_known: true, cost_known: true, cost_usd: 0.0000042 }
+      client = instance_double(Ai::JevClient, call: response)
       PipelineClassification::Evaluator.new(result: row, client: client, budget: PipelineClassification::Budget.new(offline: true)).call
       expect(row.reload.status).to eq('classified')
     end
@@ -39,10 +44,14 @@ RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
     policy.delete('classifier')
     policy['classification_source'] = { 'type' => 'pipeline_catalog' }
     b[:campaign].update!(policy: policy, policy_version: 'catalog-v2')
-    Followups::EvidenceApproval.new(campaign: b[:campaign], conversation: b[:conversation], pipeline_item: b[:item], incoming: b[:incoming], anchor: b[:anchor], actor: b[:user]).call
+    Followups::EvidenceApproval.new(campaign: b[:campaign], conversation: b[:conversation], pipeline_item: b[:item], incoming: b[:incoming],
+                                    anchor: b[:anchor], actor: b[:user]).call
     b.merge(result: row)
   end
+  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
+  # Keep the complete multi-record integration scenario and its atomic safety assertions together.
+  # rubocop:disable RSpec/MultipleExpectations
   it 'reuses a valid result without a second provider call or a copied question pack' do
     b = configured_business
     expect(b[:campaign].policy).not_to have_key('classifier')
@@ -55,6 +64,7 @@ RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
     expect(FollowupBudgetReservation.where(subject: b[:execution]).sole.actual_usd).to eq(0)
     expect(b[:item].reload.pipeline_stage_id).to eq(b[:stage].id)
   end
+  # rubocop:enable RSpec/MultipleExpectations
 
   it 'does not rearm a cancelled execution without a current recommendation despite approved evidence' do
     b = configured_business(classify: false)
@@ -89,6 +99,6 @@ RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
     Followups::Evaluator.new(subject: b[:execution], budget: offline_followup_budget).call
     expect(b[:execution].reload.status).to eq('cancelled')
     expect(FollowupBudgetReservation.where(subject: b[:execution])).to be_empty
-    expect(FollowupCampaign.new(policy: { 'classification_source' => 'invalid' }).pipeline_catalog?).to eq(false)
+    expect(FollowupCampaign.new(policy: { 'classification_source' => 'invalid' }).pipeline_catalog?).to be(false)
   end
 end

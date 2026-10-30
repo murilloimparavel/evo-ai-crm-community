@@ -1,5 +1,6 @@
 class CreatePipelineClassificationCatalogs < ActiveRecord::Migration[7.1]
-  def change
+  # Keep this reversible schema migration in one change method.
+  def change # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     add_column :pipeline_stages, :classification_profile, :jsonb, null: false, default: {}
     create_table :pipeline_classification_catalogs, id: :uuid do |t|
       t.references :pipeline, type: :uuid, null: false, foreign_key: { on_delete: :cascade }
@@ -46,7 +47,8 @@ class CreatePipelineClassificationCatalogs < ActiveRecord::Migration[7.1]
       t.bigint :input_tokens
       t.timestamps
     end
-    add_index :pipeline_classification_results, [:pipeline_id, :conversation_id, :generation, :catalog_hash, :model, :question_version], unique: true, name: 'idx_pipeline_classification_cycle'
+    add_index :pipeline_classification_results, [:pipeline_id, :conversation_id, :generation, :catalog_hash, :model, :question_version],
+              unique: true, name: 'idx_pipeline_classification_cycle'
     add_index :pipeline_classification_results, [:status, :next_attempt_at], name: 'idx_pipeline_classification_retry'
   end
 end

@@ -2,10 +2,14 @@ module Followups
   # Reuses a valid decision; this adapter never calls a provider or moves a card.
   class CatalogClassifier
     def initialize(campaign:, subject:)
-      @campaign, @subject = campaign, subject
+      @campaign = campaign
+      @subject = subject
     end
 
+    # Retain the shared adapter keyword interface even when this implementation does not consume every argument.
+    # rubocop:disable Lint/UnusedMethodArgument
     def classify(snapshot:, policy:)
+      # rubocop:enable Lint/UnusedMethodArgument
       row = PipelineClassification::CurrentResult.call(pipeline: @campaign.pipeline_stage&.pipeline, conversation: @subject.conversation)
       metadata = @campaign.classifier_config
       result = { action: 'abstain', reason: 'pipeline_classification_unavailable', model: metadata['model'],

@@ -14,7 +14,7 @@ RSpec.describe Ai::JevClient do
   let(:data) do
     { 'model' => described_class::MODEL,
       'answers' => { 'intent' => { 'type' => 'choice', 'choice' => 'customer', 'confidence' => 0.98,
-                                  'probabilities' => { 'customer' => 0.99, 'unclear' => 0.01 } },
+                                   'probabilities' => { 'customer' => 0.99, 'unclear' => 0.01 } },
                      'stop' => { 'type' => 'noul', 'noul' => 0.01 } },
       'usage' => { 'input_tokens' => 327, 'output_tokens' => 12 } }
   end
@@ -39,19 +39,23 @@ RSpec.describe Ai::JevClient do
   end
 
   it 'disables actual HTTP by default even with an available key' do
-    expect(described_class.new(api_key: 'dummy').call(state: {}, questions: questions)).to include(ok: false, reason: 'live_requests_disabled', input_tokens: 0)
+    expect(described_class.new(api_key: 'dummy').call(state: {},
+                                                      questions: questions)).to include(
+                                                        ok: false, reason: 'live_requests_disabled', input_tokens: 0
+                                                      )
     expect(WebMock).not_to have_requested(:post, described_class::ENDPOINT.to_s)
   end
 
   it 'requires runtime opt-in independently of a caller authorization' do
     previous = ENV.delete('JEV_LIVE_REQUESTS_ENABLED')
-    expect(described_class.new(api_key: 'dummy', live_authorized: true).call(state: {}, questions: questions)[:reason]).to eq('live_requests_disabled')
+    expect(described_class.new(api_key: 'dummy', live_authorized: true).call(state: {},
+                                                                             questions: questions)[:reason]).to eq('live_requests_disabled')
   ensure
     ENV['JEV_LIVE_REQUESTS_ENABLED'] = previous if previous
   end
 
   it 'uses the fixed HTTPS endpoint and does not follow redirects' do
-    previous = ENV['JEV_LIVE_REQUESTS_ENABLED']
+    previous = ENV.fetch('JEV_LIVE_REQUESTS_ENABLED', nil)
     ENV['JEV_LIVE_REQUESTS_ENABLED'] = 'true'
     stub_request(:post, described_class::ENDPOINT.to_s).to_return(status: 302, headers: { Location: 'https://invalid.example' })
     result = described_class.new(api_key: 'dummy', live_authorized: true).call(state: {}, questions: questions)
@@ -103,7 +107,10 @@ RSpec.describe Ai::JevClient do
 
   it 'keeps unknown usage unknown on timeout with no automatic retries' do
     count = 0
-    timed = described_class.new(transport: lambda { |**_args| count += 1; raise Net::ReadTimeout })
+    timed = described_class.new(transport: lambda { |**_args|
+      count += 1
+      raise Net::ReadTimeout
+    })
     expect(timed.call(state: {}, questions: questions)).to include(ok: false, usage_known: false, input_tokens: nil, retryable: true)
     expect(count).to eq(1)
   end
@@ -124,7 +131,7 @@ RSpec.describe Ai::JevClient do
 
   it 'bounds request and response bytes' do
     expect(client.call(state: 'é' * 7000, questions: questions)).to include(ok: false, reason: 'request_too_large')
-    huge = described_class.new(transport: ->(**_args) { { status: 200, body: 'a' * (64 * 1024 + 1) } })
+    huge = described_class.new(transport: ->(**_args) { { status: 200, body: 'a' * ((64 * 1024) + 1) } })
     expect(huge.call(state: {}, questions: questions)).to include(ok: false, reason: 'invalid_provider_schema')
   end
 
@@ -135,10 +142,10 @@ RSpec.describe Ai::JevClient do
 
   it 'supports Score with closed finite levels, legend and weighted mean validation' do
     questions.clear
-    questions['urgency'] = { 'type' => 'score', 'instructions' => 'Urgency?', 'criteria' => ['Routine', 'Soon', 'Immediate'] }
+    questions['urgency'] = { 'type' => 'score', 'instructions' => 'Urgency?', 'criteria' => %w[Routine Soon Immediate] }
     data['answers'] = { 'urgency' => { 'type' => 'score', 'score' => 1.43, 'confidence' => 0.35,
-                                      'legend' => { '0' => 'Routine', '1' => 'Soon', '2' => 'Immediate' },
-                                      'probabilities' => { '0' => 0.0, '1' => 0.57, '2' => 0.43 } } }
+                                       'legend' => { '0' => 'Routine', '1' => 'Soon', '2' => 'Immediate' },
+                                       'probabilities' => { '0' => 0.0, '1' => 0.57, '2' => 0.43 } } }
     expect(classify[:ok]).to be(true)
     data['answers']['urgency']['score'] = 999
     expect(classify[:ok]).to be(false)

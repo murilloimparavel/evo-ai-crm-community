@@ -6,6 +6,8 @@ module Followups
       @client = client
     end
 
+    # Keep schema verification, confidence checks and action precedence together in this closed decision contract.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def classify(snapshot:, policy:)
       @metadata = nil
       config = policy.fetch('classifier')
@@ -21,6 +23,7 @@ module Followups
       if JSON.generate(model: config['model'], state: snapshot[:state], questions: questions).bytesize > Ai::JevClient::MAX_REQUEST_BYTES
         return result('abstain', 'snapshot_too_large')
       end
+
       response = @client.call(state: snapshot[:state], questions: questions, model: config['model'])
       @metadata.merge!(response.slice(:model, :input_tokens, :usage_known, :retryable, :retry_after))
       return result('abstain', response[:reason] || 'classifier_failed') unless response[:ok]
@@ -41,21 +44,24 @@ module Followups
       if snapshot[:classification_only] == true || snapshot.dig(:references, :classification_only) == true
         return result('abstain', 'observation_only').merge(classification: classification, proposed_action: decision[:action])
       end
+
       if decision[:action] == 'send'
-        return result('abstain', 'approved_anchor_required') unless snapshot.dig(:references, :anchor_message_id).present?
+        return result('abstain', 'approved_anchor_required') if snapshot.dig(:references, :anchor_message_id).blank?
         return result('abstain', 'template_not_approved') unless Templates.fetch(decision[:template_id])
       end
       decision.merge(@metadata).merge(classification: classification)
     rescue QuestionValidator::Invalid, DecisionRules::Invalid, KeyError, TypeError, NoMethodError, ArgumentError, JSON::GeneratorError
       result('abstain', 'invalid_classifier_configuration')
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     private
 
     def result(action, reason)
       { action: action, reason: reason, template_id: nil }.merge(@metadata || {
-        model: nil, question_version: nil, input_tokens: 0, usage_known: true, retryable: false, retry_after: nil
-      })
+                                                                   model: nil, question_version: nil, input_tokens: 0,
+                                                                   usage_known: true, retryable: false, retry_after: nil
+                                                                 })
     end
   end
 end

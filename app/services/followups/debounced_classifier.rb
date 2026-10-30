@@ -1,15 +1,21 @@
 module Followups
   class DebouncedClassifier
     def initialize(conversation:, generation:, evaluator_factory: nil, now: Time.current)
-      @conversation, @generation, @factory, @now = conversation, generation, evaluator_factory, now
+      @conversation = conversation
+      @generation = generation
+      @factory = evaluator_factory
+      @now = now
     end
 
+    # Retain generation validation and unique result reservation within the existing conversation transaction.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def call
       rows = []
       @conversation.with_lock do
         state = FollowupConversationState.for!(@conversation)
         state.lock!
         next [] unless state.classification_generation == @generation && state.classification_due_at && state.classification_due_at <= @now
+
         unless @conversation.messages.incoming.exists?(id: state.latest_incoming_message_id)
           state.update!(classification_due_at: nil, latest_incoming_message_id: nil, classification_generation: state.classification_generation + 1)
           next []
@@ -21,8 +27,11 @@ module Followups
           next if Eligibility.new(campaign: campaign, conversation: @conversation, now: @now).reason
 
           config = campaign.policy['classifier']
-          rows << FollowupClassification.create_or_find_by!(followup_campaign: campaign, conversation: @conversation, generation: @generation, policy_version: campaign.policy_version, model: config['model'], question_version: config['question_version']) do |row|
-            row.assign_attributes(source_incoming_message_id: state.latest_incoming_message_id, revision: state.revision, expires_at: @now + campaign.policy['authorization_ttl_seconds'].seconds)
+          rows << FollowupClassification.create_or_find_by!(followup_campaign: campaign, conversation: @conversation, generation: @generation,
+                                                            policy_version: campaign.policy_version, model: config['model'],
+                                                            question_version: config['question_version']) do |row|
+            row.assign_attributes(source_incoming_message_id: state.latest_incoming_message_id, revision: state.revision,
+                                  expires_at: @now + campaign.policy['authorization_ttl_seconds'].seconds)
           end
         end
         state.update!(classification_due_at: nil)
@@ -33,5 +42,6 @@ module Followups
       end
       rows
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
   end
 end

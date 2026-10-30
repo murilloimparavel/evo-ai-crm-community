@@ -13,11 +13,17 @@ end
 return unless defined?(Rails)
 
 RSpec.describe Whatsapp::EvolutionHandlers::MessagesUpdate do
+  subject(:host) { host_class.new }
+
   let(:host_class) do
     Class.new do
       include Whatsapp::EvolutionHandlers::MessagesUpdate
 
       attr_accessor :raw_message_id
+
+      def incoming?
+        false
+      end
     end
   end
 
@@ -31,11 +37,8 @@ RSpec.describe Whatsapp::EvolutionHandlers::MessagesUpdate do
     )
   end
 
-  subject(:host) { host_class.new }
-
   before do
     host.instance_variable_set(:@message, message)
-    allow(host).to receive(:incoming?).and_return(false)
   end
 
   describe '#update_status' do
@@ -98,14 +101,15 @@ RSpec.describe Whatsapp::EvolutionHandlers::MessagesUpdate do
     it 'AC3 e2e: real funnel rejects failed→delivered' do
       failed_message = instance_double(
         Message, status: 'failed', failed?: true, read?: false, delivered?: false,
+                 has_attribute?: true, followup_execution_id: nil,
                  content_attributes: {}
       )
       host.instance_variable_set(:@message, failed_message)
       host.instance_variable_set(:@raw_message, { status: 'DELIVERY_ACK' })
-      allow(host).to receive(:refresh_conversation_activity)
       allow(Message).to receive(:statuses).and_return('sent' => 0, 'delivered' => 1, 'read' => 2, 'failed' => 3)
 
       expect(failed_message).not_to receive(:update!)
+      expect(failed_message).not_to receive(:refresh_conversation_activity!)
       host.send(:update_status)
     end
   end

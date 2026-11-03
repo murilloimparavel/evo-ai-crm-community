@@ -84,6 +84,12 @@
 - ai_integration_credentials.read
 - ai_integration_credentials.update
 - ai_integration_credentials.write
+- ai_knowledge.create
+- ai_knowledge.delete
+- ai_knowledge.publish
+- ai_knowledge.read
+- ai_knowledge.update
+- ai_knowledge.write
 - ai_mcp_servers.create
 - ai_mcp_servers.delete
 - ai_mcp_servers.read
@@ -321,6 +327,7 @@
 - users.manage
 - users.permissions
 - users.read
+- users.reset_password
 - users.remove_avatar
 - users.stats
 - users.types

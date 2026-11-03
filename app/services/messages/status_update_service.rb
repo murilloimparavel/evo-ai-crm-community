@@ -9,7 +9,21 @@ class Messages::StatusUpdateService
     @external_error = external_error
   end
 
+  # Keep receipt correlation, follow-up safety gates and terminal Message transitions in their existing order.
+  # rubocop:disable Metrics/CyclomaticComplexity
   def perform
+    if Followups::DispatchProtection.managed?(message)
+      execution = FollowupExecution.find_by(id: message.followup_execution_id)
+      unless execution&.target_available?
+        Followups::Retention.retire!(execution) if execution
+        return false
+      end
+      return false unless Followups::SafetyStop.check_identity(message) && Followups::SafetyStop.check_receipt(message)
+
+      # Late provider receipts can resolve an ambiguous attempt even when the
+      # ordinary Message enum is failed/terminal. No identifier means no proof.
+      Followups::DeliveryTracker.status_changed(message: message, status: status, provider_id: message.source_id)
+    end
     return false unless valid_status_transition?
 
     previous_status = message.status
@@ -24,6 +38,7 @@ class Messages::StatusUpdateService
             })
     true
   end
+  # rubocop:enable Metrics/CyclomaticComplexity
 
   private
 

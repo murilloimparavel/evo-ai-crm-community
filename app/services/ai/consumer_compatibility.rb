@@ -12,6 +12,7 @@ class Ai::ConsumerCompatibility
 
   CONSUMERS = {
     ai_agents: ALL_PROVIDERS,
+    pipeline_classification: %w[openrouter].freeze,
     inbox_assist: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
     # Groq and OpenRouter both expose the OpenAI-compatible audio/transcriptions
     # contract even though the core does not classify them as general chat

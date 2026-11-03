@@ -1,0 +1,14 @@
+# Preserve the verified production runtime/dependencies. The source checkout must
+# contain production 135c333 plus the reviewed additive classification changes.
+FROM ghcr.io/murilloimparavel/crcn-knowledge-crm@sha256:4d8eedeb278694e7bcd8bcc18ddc5ee31dc00db023d8d9f4f54b80737811a9df
+
+# Copy the complete application namespaces so new models, services, jobs, routes,
+# cron definitions and migrations cannot be omitted by an outdated file list.
+# Secrets stay in runtime environment; .dockerignore excludes .env files.
+COPY app/ /app/app/
+COPY config/ /app/config/
+COPY lib/ /app/lib/
+COPY db/ /app/db/
+
+ARG GIT_SHA
+RUN test -n "$GIT_SHA" && printf '%s\n' "$GIT_SHA" > /app/.git_sha

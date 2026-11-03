@@ -48,19 +48,19 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == pull_request && -n "$BASE_SHA" ]]; then
-            mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- '*.rb')
+            mapfile -t ruby_files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA...$HEAD_SHA" -- '*.rb')
             if ((${#ruby_files[@]} == 0)); then
               echo "No Ruby files changed; skipping RuboCop for this pull request."
               exit 0
             fi
-            bundle exec rubocop --format progress "${ruby_files[@]}"
+            bundle exec rubocop --force-exclusion --format progress "${ruby_files[@]}"
           elif [[ "$EVENT_NAME" == push && -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
-            mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.rb')
+            mapfile -t ruby_files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- '*.rb')
             if ((${#ruby_files[@]} == 0)); then
               echo "No Ruby files changed in this push; skipping RuboCop."
               exit 0
             fi
-            bundle exec rubocop --format progress "${ruby_files[@]}"
+            bundle exec rubocop --force-exclusion --format progress "${ruby_files[@]}"
           else
             bundle exec rubocop --format progress
           fi

@@ -68,9 +68,8 @@ module KnowledgeRuntime
       proof, grant = decode(token, 'knowledge-response', allow_expired: true)
       validate_delivery!(proof, grant, content, conversation, bot)
       reusable = proof.fetch('reusable', true) && fresh_authority?(token, grant)
-      lock_key = Digest::SHA256.hexdigest(proof['jti'])[0, 16].to_i(16) % ((2**63) - 1)
       ApplicationRecord.transaction do
-        ApplicationRecord.connection.execute("SELECT pg_advisory_xact_lock(#{lock_key})")
+        lock_delivery!(proof.fetch('jti'))
         existing = KnowledgeResponseProvenance.find_by(proof_jti: proof['jti'])
         next existing_message!(existing, conversation, proof) if existing
 
@@ -79,6 +78,12 @@ module KnowledgeRuntime
 
         persist!(message, proof, grant, content, reusable)
       end
+    end
+
+    def self.lock_delivery!(proof_id)
+      lock_key = Digest::SHA256.hexdigest(proof_id)[0, 16].to_i(16) % ((2**63) - 1)
+      bind = ActiveRecord::Relation::QueryAttribute.new('lock_key', lock_key, ActiveRecord::Type::Integer.new(limit: 8))
+      ApplicationRecord.connection.exec_query('SELECT 1 FROM pg_advisory_xact_lock($1::bigint)', 'Knowledge delivery lock', [bind])
     end
 
     def self.fresh_authority?(token, grant)
@@ -164,6 +169,6 @@ module KnowledgeRuntime
     end
     private_class_method :signed_claims!, :grant_identity!, :validate_lifetime!, :validate_executor!, :signed_delivery_identity!, :fresh_authority?,
                          :validate_delivery!, :validate_reuse!, :validate_sources!, :existing_message!, :persist!, :current_policy?,
-                         :current_message?, :current_revision, :current_source?, :source_entry
+                         :current_message?, :current_revision, :current_source?, :source_entry, :lock_delivery!
   end
 end

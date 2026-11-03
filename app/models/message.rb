@@ -35,6 +35,7 @@
 #  index_messages_on_source_id                  (source_id)
 #
 class Message < ApplicationRecord
+  include KnowledgeProvenanceInvalidation
   include MessageFilterHelpers
   include Liquidable
   include Wisper::Publisher

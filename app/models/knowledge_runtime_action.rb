@@ -1,0 +1,2 @@
+class KnowledgeRuntimeAction < ApplicationRecord
+end

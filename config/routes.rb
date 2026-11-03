@@ -1,4 +1,9 @@
 Rails.application.routes.draw do
+  post '/internal/knowledge_runtime/actions', to: 'knowledge_runtime_actions#create'
+  post '/internal/knowledge_runtime/grants', to: 'knowledge_runtime_grants#create'
+  post '/internal/knowledge_runtime/identity', to: 'knowledge_runtime_grants#identity'
+  post '/internal/knowledge_runtime/history', to: 'knowledge_runtime_history#create'
+  post '/internal/knowledge_runtime/retrieve', to: 'knowledge_runtime_retrieval#create'
   get '/health/live', to: 'health#live'
   get '/health/ready', to: 'health#ready'
   get '/metrics', to: 'health#metrics'
@@ -168,6 +173,13 @@ Rails.application.routes.draw do
 
       resources :labels, only: [:index, :show, :create, :update, :destroy], controller: 'labels'
 
+      resources :knowledge_bases, only: [:index, :show, :create, :update] do
+        member do
+          post :archive
+          post :test_retrieval
+        end
+      end
+
       resources :knowledge_entries, only: [:index, :show, :create, :update, :destroy] do
         get :search, on: :collection
         post :publish, on: :member
@@ -227,6 +239,7 @@ Rails.application.routes.draw do
 
       resources :agents, only: [:index, :create, :update, :destroy], controller: 'agents' do
         post :bulk_create, on: :collection
+        resource :knowledge_bases, only: [:show, :update], controller: 'knowledge_agent_bindings'
       end
 
       resources :agent_bots, only: [:index, :create, :show, :update, :destroy], controller: 'agent_bots' do

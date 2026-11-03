@@ -1,4 +1,7 @@
 class KnowledgeEntry < ApplicationRecord
+  belongs_to :knowledge_base, optional: true
+  validate :base_matches_scope
+
   CONTENT_TYPES = %w[faq rule company property].freeze
   STATUSES = %w[draft published archived].freeze
 
@@ -21,6 +24,10 @@ class KnowledgeEntry < ApplicationRecord
   end
 
   private
+
+  def base_matches_scope
+    errors.add(:knowledge_base, 'belongs to another account') if knowledge_base && knowledge_base.account_scope != account_scope
+  end
 
   def tags_are_strings
     errors.add(:tags, 'must contain strings') unless tags.is_a?(Array) && tags.all? { |tag| tag.is_a?(String) && tag.length <= 80 }

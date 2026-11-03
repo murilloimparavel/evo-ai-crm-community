@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_10_29_127000) do
+ActiveRecord::Schema[7.1].define(version: 2026_11_03_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -858,6 +858,44 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_29_127000) do
     t.jsonb "settings", default: {}
   end
 
+  create_table "knowledge_agent_access_profiles", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "account_scope", null: false
+    t.uuid "external_agent_id", null: false
+    t.bigint "revision", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_scope", "external_agent_id"], name: "idx_knowledge_agent_profile", unique: true
+  end
+
+  create_table "knowledge_agent_bindings", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "account_scope", null: false
+    t.uuid "external_agent_id", null: false
+    t.uuid "knowledge_base_id", null: false
+    t.boolean "enabled", default: true, null: false
+    t.uuid "created_by_id"
+    t.uuid "updated_by_id"
+    t.integer "lock_version", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_scope", "external_agent_id", "knowledge_base_id"], name: "idx_knowledge_agent_binding_unique", unique: true
+    t.index ["knowledge_base_id"], name: "index_knowledge_agent_bindings_on_knowledge_base_id"
+  end
+
+  create_table "knowledge_bases", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "account_scope", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "status", default: "active", null: false
+    t.boolean "legacy_default", default: false, null: false
+    t.integer "lock_version", default: 0, null: false
+    t.uuid "created_by_id"
+    t.uuid "updated_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "account_scope, lower(btrim((name)::text))", name: "idx_knowledge_bases_scope_name", unique: true
+    t.index ["account_scope"], name: "idx_knowledge_default_per_scope", unique: true, where: "legacy_default"
+  end
+
   create_table "knowledge_entries", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "title", null: false
     t.text "body", null: false
@@ -871,10 +909,41 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_29_127000) do
     t.datetime "published_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.uuid "knowledge_base_id"
     t.index "to_tsvector('portuguese'::regconfig, (((COALESCE(title, ''::character varying))::text || ' '::text) || COALESCE(body, ''::text)))", name: "index_knowledge_entries_on_portuguese_text", using: :gin
     t.index ["account_scope"], name: "index_knowledge_entries_on_account_scope"
+    t.index ["knowledge_base_id"], name: "index_knowledge_entries_on_knowledge_base_id"
     t.index ["status"], name: "index_knowledge_entries_on_status"
     t.index ["tags"], name: "index_knowledge_entries_on_tags", using: :gin
+  end
+
+  create_table "knowledge_response_provenances", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "message_id"
+    t.boolean "reusable", default: false, null: false
+    t.string "proof_jti", null: false
+    t.string "account_scope", null: false
+    t.string "executor_id", null: false
+    t.string "config_sha256", null: false
+    t.string "body_sha256", null: false
+    t.integer "profile_revision", default: 0, null: false
+    t.jsonb "tool_categories", default: [], null: false
+    t.jsonb "sources", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["message_id"], name: "index_knowledge_response_provenances_on_message_id", unique: true
+    t.index ["proof_jti"], name: "index_knowledge_response_provenances_on_proof_jti", unique: true
+  end
+
+  create_table "knowledge_runtime_actions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "account_scope", null: false
+    t.uuid "event_id", null: false
+    t.uuid "agent_id", null: false
+    t.uuid "action_id", null: false
+    t.string "body_sha256", null: false
+    t.jsonb "result", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["event_id", "agent_id", "action_id"], name: "idx_knowledge_action_identity", unique: true
   end
 
   create_table "labels", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1709,6 +1778,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_29_127000) do
   add_foreign_key "followup_executions", "pipeline_classification_results", on_delete: :nullify
   add_foreign_key "followup_executions", "pipeline_items", on_delete: :nullify
   add_foreign_key "followup_templates", "users", column: "approved_by_id", on_delete: :nullify
+  add_foreign_key "knowledge_agent_bindings", "knowledge_bases", column: "knowledge_base_id"
+  add_foreign_key "knowledge_entries", "knowledge_bases", column: "knowledge_base_id"
+  add_foreign_key "knowledge_response_provenances", "messages", on_delete: :nullify
   add_foreign_key "macro_executions", "conversations"
   add_foreign_key "macro_executions", "macros"
   add_foreign_key "macro_executions", "users"
@@ -1751,4 +1823,58 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_29_127000) do
   add_foreign_key "user_roles", "users"
   add_foreign_key "user_roles", "users", column: "granted_by_id"
   add_foreign_key "whatsapp_template_publications", "whatsapp_template_definitions", name: "fk_wa_template_publications_definition", on_delete: :cascade
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute(<<-SQL)
+CREATE OR REPLACE FUNCTION public.knowledge_action_lock_bot_inbox()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE scoped_id text;
+BEGIN
+  FOR scoped_id IN
+    SELECT DISTINCT value FROM unnest(ARRAY[
+      CASE WHEN TG_OP <> 'INSERT' THEN OLD.inbox_id::text END,
+      CASE WHEN TG_OP <> 'DELETE' THEN NEW.inbox_id::text END
+    ]) AS value WHERE value IS NOT NULL ORDER BY value
+  LOOP
+    PERFORM pg_advisory_xact_lock(hashtextextended('knowledge-inbox:' || scoped_id, 0));
+  END LOOP;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$function$
+  SQL
+
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute(<<-SQL)
+CREATE OR REPLACE FUNCTION public.knowledge_action_lock_bot_parent()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE scoped_id text;
+BEGIN
+  IF TG_TABLE_NAME = 'inboxes' THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('knowledge-inbox:' || OLD.id::text, 0));
+  ELSE
+    FOR scoped_id IN SELECT DISTINCT inbox_id::text FROM agent_bot_inboxes
+      WHERE agent_bot_id = OLD.id ORDER BY inbox_id::text
+    LOOP
+      PERFORM pg_advisory_xact_lock(hashtextextended('knowledge-inbox:' || scoped_id, 0));
+    END LOOP;
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$function$
+  SQL
+
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute("CREATE TRIGGER knowledge_bot_inbox_mutex BEFORE INSERT OR DELETE OR UPDATE ON \"agent_bot_inboxes\" FOR EACH ROW EXECUTE FUNCTION knowledge_action_lock_bot_inbox()")
+
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute("CREATE TRIGGER knowledge_bot_parent_mutex BEFORE DELETE OR UPDATE ON \"agent_bots\" FOR EACH ROW EXECUTE FUNCTION knowledge_action_lock_bot_parent()")
+
+  # no candidate create_trigger statement could be found, creating an adapter-specific one
+  execute("CREATE TRIGGER knowledge_inbox_parent_mutex BEFORE DELETE OR UPDATE ON \"inboxes\" FOR EACH ROW EXECUTE FUNCTION knowledge_action_lock_bot_parent()")
+
 end

@@ -10,11 +10,12 @@ RSpec.describe KnowledgeRuntime::GrantIssuer do
   let(:message_id) { '33333333-3333-4333-8333-333333333333' }
   let(:bot_id) { '44444444-4444-4444-8444-444444444444' }
   let(:root_id) { '55555555-5555-4555-8555-555555555555' }
-  let(:conversation) { double(id: conversation_id, inbox_id: inbox_id, contact_id: contact_id) }
-  let(:message) { double(id: message_id, incoming?: true, private?: false, created_at: 10.seconds.ago) }
-  let(:bot) { double(id: bot_id, outgoing_url: "https://processor.example/api/v1/a2a/#{root_id}", bot_config: { 'agent_id' => root_id }) }
-  let(:assignment) { double(agent_bot_id: bot_id) }
+  let(:conversation) { instance_double(Conversation, id: conversation_id, inbox_id: inbox_id, contact_id: contact_id) }
+  let(:message) { instance_double(Message, id: message_id, incoming?: true, private?: false, created_at: 10.seconds.ago) }
+  let(:bot) { instance_double(AgentBot, id: bot_id, outgoing_url: "https://processor.example/api/v1/a2a/#{root_id}", bot_config: { 'agent_id' => root_id }) }
+  let(:assignment) { instance_double(AgentBotInbox, agent_bot_id: bot_id) }
   let(:relation) { double }
+  let(:resolver) { instance_double(AgentBots::SessionSyncAgentResolver, call: root_id) }
   let(:arguments) { { conversation_id: conversation_id, message_id: message_id, bot_id: bot_id } }
 
   around do |example|
@@ -40,7 +41,7 @@ RSpec.describe KnowledgeRuntime::GrantIssuer do
     allow(relation).to receive(:limit).with(2).and_return(relation)
     allow(relation).to receive(:to_a).and_return([assignment])
     allow(AgentBot).to receive(:find_by).with(id: bot_id).and_return(bot)
-    allow_any_instance_of(AgentBots::SessionSyncAgentResolver).to receive(:call).and_return(root_id)
+    allow(AgentBots::SessionSyncAgentResolver).to receive(:new).and_return(resolver)
   end
 
   it 'signs an event-bound, short-lived, single-scope grant' do
@@ -84,14 +85,14 @@ RSpec.describe KnowledgeRuntime::GrantIssuer do
   end
 
   it 'denies a foreign, private or non-incoming event' do
-    [nil, double(incoming?: false, private?: false), double(incoming?: true, private?: true)].each do |event|
+    [nil, instance_double(Message, incoming?: false, private?: false), instance_double(Message, incoming?: true, private?: true)].each do |event|
       allow(Message).to receive(:find_by).and_return(event)
       expect { described_class.issue(**arguments) }.to raise_error(described_class::Denied)
     end
   end
 
   it 'denies missing, ambiguous or mismatched active bot assignments' do
-    [[], [assignment, assignment], [double(agent_bot_id: SecureRandom.uuid)]].each do |records|
+    [[], [assignment, assignment], [instance_double(AgentBotInbox, agent_bot_id: SecureRandom.uuid)]].each do |records|
       allow(relation).to receive(:to_a).and_return(records)
       expect { described_class.issue(**arguments) }.to raise_error(described_class::Denied)
     end
@@ -101,7 +102,7 @@ RSpec.describe KnowledgeRuntime::GrantIssuer do
     allow(bot).to receive(:bot_config).and_return({ 'agent_id' => SecureRandom.uuid })
     expect { described_class.issue(**arguments) }.to raise_error(described_class::Denied)
     allow(bot).to receive(:bot_config).and_return({ 'agent_id' => root_id })
-    allow_any_instance_of(AgentBots::SessionSyncAgentResolver).to receive(:call).and_return(SecureRandom.uuid)
+    allow(resolver).to receive(:call).and_return(SecureRandom.uuid)
     expect { described_class.issue(**arguments) }.to raise_error(described_class::Denied)
   end
 

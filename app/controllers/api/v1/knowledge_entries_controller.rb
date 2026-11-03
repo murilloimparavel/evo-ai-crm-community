@@ -157,7 +157,7 @@ class Api::V1::KnowledgeEntriesController < Api::V1::BaseController
     entry.attributes.slice('id', 'title', 'body', 'content_type', 'tags', 'source', 'status',
                            'created_at', 'updated_at', 'published_at', 'created_by_id', 'updated_by_id', 'knowledge_base_id')
          .merge('can_edit' => editable?(entry),
-                'can_publish' => !!(can_manage_publication && entry.knowledge_base&.legacy_default? && entry.knowledge_base&.status == 'active'),
+                'can_publish' => (can_manage_publication && entry.knowledge_base&.legacy_default? && entry.knowledge_base.status == 'active') == true,
                 'can_archive' => !!can_manage_publication)
   end
 end

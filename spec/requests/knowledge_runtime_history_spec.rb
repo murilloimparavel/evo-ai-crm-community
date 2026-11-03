@@ -19,7 +19,7 @@ RSpec.describe 'Knowledge runtime customer history' do
                'KNOWLEDGE_RUNTIME_ACCOUNT_SCOPE' => 'community', 'KNOWLEDGE_RUNTIME_GRANT_ISSUER' => 'crm',
                'KNOWLEDGE_RUNTIME_GRANT_AUDIENCE' => 'knowledge', 'KNOWLEDGE_RUNTIME_GRANT_KID' => 'test',
                'KNOWLEDGE_RUNTIME_GRANT_PRIVATE_KEY' => key.to_pem, 'KNOWLEDGE_RUNTIME_HISTORY_PUBLIC_KEYS' => '{}' }
-    previous = values.keys.to_h { |name| [name, ENV[name]] }
+    previous = values.keys.index_with { |name| ENV.fetch(name, nil) }
     ENV.update(values)
     example.run
   ensure
@@ -28,7 +28,7 @@ RSpec.describe 'Knowledge runtime customer history' do
 
   it 'returns only customer text up to the verified event and rejects a forged grant' do
     allow(RuntimeConfig).to receive(:account).and_return(nil)
-    allow_any_instance_of(AgentBots::SessionSyncAgentResolver).to receive(:call).and_return(root_id)
+    allow(AgentBots::SessionSyncAgentResolver).to receive(:new).and_return(instance_double(AgentBots::SessionSyncAgentResolver, call: root_id))
     AgentBotInbox.create!(agent_bot: bot, inbox: inbox, status: :active)
     conversation.messages.create!(inbox: inbox, message_type: :incoming, content: 'Primeira', created_at: 4.seconds.ago)
     conversation.messages.create!(inbox: inbox, message_type: :outgoing, content: 'Segredo', created_at: 3.seconds.ago)
@@ -45,14 +45,15 @@ RSpec.describe 'Knowledge runtime customer history' do
     expect(response).to have_http_status(:forbidden)
     post '/internal/knowledge_runtime/history', headers: headers.except('X-Knowledge-History-Token'), as: :json
     expect(response).to have_http_status(:unauthorized)
-    after_event.update_column(:created_at, event.created_at)
+    # Deliberately bypass timestamps to exercise rejection of ambiguous source order.
+    after_event.update_column(:created_at, event.created_at) # rubocop:disable Rails/SkipsModelValidations
     post '/internal/knowledge_runtime/history', headers: headers, as: :json
     expect(response).to have_http_status(:forbidden)
   end
 
   it 'accepts a still-valid grant from an explicitly trusted previous public key' do
     allow(RuntimeConfig).to receive(:account).and_return(nil)
-    allow_any_instance_of(AgentBots::SessionSyncAgentResolver).to receive(:call).and_return(root_id)
+    allow(AgentBots::SessionSyncAgentResolver).to receive(:new).and_return(instance_double(AgentBots::SessionSyncAgentResolver, call: root_id))
     AgentBotInbox.create!(agent_bot: bot, inbox: inbox, status: :active)
     event = conversation.messages.create!(inbox: inbox, message_type: :incoming, content: 'Olá', created_at: 1.second.ago)
     old_key = OpenSSL::PKey::RSA.generate(2048)

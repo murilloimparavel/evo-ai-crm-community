@@ -10,7 +10,9 @@ RSpec.describe 'Bot Runtime postback handoff marker', type: :request do
   before do
     allow(BotRuntime::Config).to receive(:secret).and_return(nil)
     allow(Conversation).to receive(:find_by).with(display_id: '3686').and_return(conversation)
-    allow_any_instance_of(Webhooks::BotRuntimeController).to receive(:find_active_agent_bot).and_return(agent_bot)
+    allow(conversation.inbox).to receive(:agent_bot_inbox).and_return(
+      instance_double(AgentBotInbox, active?: true, agent_bot: agent_bot)
+    )
     allow(AgentBots::MessageCreator).to receive(:new).with(agent_bot).and_return(creator)
     allow(AgentBots::MediaUrlExtractor).to receive(:call).and_return(text: 'resposta final', media: [])
     allow(creator).to receive(:create_bot_reply).and_return(instance_double(Message, id: SecureRandom.uuid))

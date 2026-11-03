@@ -40,6 +40,12 @@ agent_bots_inactivity_check_scheduler_job:
   queue: scheduled_jobs
   description: 'Check inactive conversations and process inactivity actions'
 
+urgent_unanswered_conversations_job:
+  cron: '* * * * *'
+  class: 'Conversations::UrgentUnansweredJob'
+  queue: scheduled_jobs
+  description: 'Route unanswered conversations to urgent follow-up after two minutes'
+
 # executed At every minute to fire stage-level inactivity automation rules
 pipelines_stage_inactivity_check_scheduler_job:
   cron: '* * * * *'

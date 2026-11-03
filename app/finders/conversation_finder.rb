@@ -105,6 +105,7 @@ class ConversationFinder
     # Apply chip filters (unread / unanswered / groups / archived) — list-only
     query = apply_unread_filter(query)
     query = apply_unanswered_filter(query)
+    query = apply_urgent_followup_filter(query)
     query = apply_is_group_filter(query)
     query = apply_archived_filter(query)
 
@@ -153,6 +154,7 @@ class ConversationFinder
 
   def apply_status_filter(query)
     return query if @params[:status] == 'all'
+    return query if @params[:status].blank? && ActiveModel::Type::Boolean.new.cast(@params[:urgent_followup])
 
     query.where(status: @params[:status] || DEFAULT_STATUS)
   end
@@ -204,6 +206,12 @@ class ConversationFinder
     return query unless ActiveModel::Type::Boolean.new.cast(@params[:unanswered])
 
     query.assigned_to(@current_user).unanswered
+  end
+
+  def apply_urgent_followup_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:urgent_followup])
+
+    query.where("conversations.custom_attributes->>'urgent_followup' = 'true'")
   end
 
   # Chip "Grupos": conversas cujo contato é um grupo (contact.type = 'group').

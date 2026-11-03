@@ -9,6 +9,15 @@ class AgentBots::MessageCreator
   # resolves, its rendered content replaces the provided inline content.
   def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil, media: nil,
                        message_template_id: nil, processed_params: {})
+    if content_attributes&.dig(:urgent_followup)
+      conversation.reload
+      return unless (conversation.open? || conversation.pending?) && conversation.custom_attributes&.dig('archived').to_s != 'true'
+      source = conversation.messages.incoming.order(created_at: :desc).first
+      return unless source && source.created_at > 24.hours.ago &&
+                    conversation.custom_attributes&.dig('urgent_followup_message_id') == source.id
+      return if conversation.messages.where(message_type: %i[outgoing template], private: false)
+                            .where('created_at >= ?', source.created_at).exists?
+    end
     if message_template_id.present?
       rendered = render_template_reply(message_template_id, conversation, processed_params)
       content = rendered if rendered.present?
@@ -22,7 +31,7 @@ class AgentBots::MessageCreator
       Rails.logger.info "[AgentBot HTTP] Force creating bot reply (skipping eligibility check) in conversation #{conversation.id}"
     else
       # conversation_eligible_for_bot_reply? already logs which rule rejected.
-      return unless conversation_eligible_for_bot_reply?(conversation)
+      return unless conversation_eligible_for_bot_reply?(conversation, urgent_followup: content_attributes&.dig(:urgent_followup))
     end
 
     Rails.logger.info "[AgentBot HTTP] Creating bot reply in conversation #{conversation.id} (#{media.size} media)"
@@ -46,12 +55,13 @@ class AgentBots::MessageCreator
     nil
   end
 
-  def conversation_eligible_for_bot_reply?(conversation)
+  def conversation_eligible_for_bot_reply?(conversation, urgent_followup: false)
     # Find the AgentBotInbox configuration for this conversation's inbox
     agent_bot_inbox = AgentBotInbox.find_by(agent_bot: @agent_bot, inbox: conversation.inbox)
 
     unless agent_bot_inbox
       Rails.logger.warn "[AgentBot HTTP] No AgentBotInbox found for agent_bot #{@agent_bot.id} and inbox #{conversation.inbox.id}"
+      return false if urgent_followup
       # Fallback to legacy behavior: only pending conversations
       is_pending = conversation.status == 'pending'
       Rails.logger.debug { "[AgentBot HTTP] Conversation status check (legacy): #{conversation.status} -> eligible: #{is_pending}" }
@@ -60,7 +70,11 @@ class AgentBots::MessageCreator
 
     # CRM-212: same gate as AgentBotListener, and the reply is discarded here
     # AFTER the LLM already ran — so the log has to name the rule that rejected.
-    skip_reason = agent_bot_inbox.processing_block_reason(conversation)
+    skip_reason = if urgent_followup
+                    agent_bot_inbox.urgent_followup_block_reason(conversation)
+                  else
+                    agent_bot_inbox.processing_block_reason(conversation)
+                  end
     return true if skip_reason.nil?
 
     Rails.logger.warn "[AgentBot HTTP] ❌ reply discarded - conv #{conversation.id}: #{skip_reason}"

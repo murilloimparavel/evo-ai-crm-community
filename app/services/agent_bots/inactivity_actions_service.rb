@@ -32,6 +32,31 @@ class AgentBots::InactivityActionsService
     execute_action(action_to_execute, last_incoming)
   end
 
+  # The urgent queue uses its own reserved step, leaving the configured
+  # inactivity cadence untouched. A repeated scheduler pass reconciles a
+  # pending execution rather than sending a second message.
+  def process_urgent_followup(source_message)
+    return unless @agent_bot.evo_ai_provider?
+
+    @urgent_followup = true
+    return unless current_for_followup_cycle?(source_message)
+    InactivityActionExecution.for_conversation(@conversation.id)
+                             .where(action_index: -2)
+                             .where.not(source_incoming_message_id: source_message.id)
+                             .delete_all
+    return if InactivityActionExecution.action_executed?(@conversation.id, -2)
+
+    pending = InactivityActionExecution.for_conversation(@conversation.id)
+                                       .pending.find_by(action_index: -2)
+    if pending
+      process_pending_execution(pending, source_message)
+    else
+      action = { 'action' => 'interact', 'minutes' => 2,
+                 'intent' => 'Retome a conversa de forma breve e contextual. Responda à última dúvida do cliente e ofereça o próximo passo útil.' }
+      execute_action({ config: action, index: -2 }, source_message)
+    end
+  end
+
   private
 
   def should_process?
@@ -46,6 +71,9 @@ class AgentBots::InactivityActionsService
       Rails.logger.debug "[InactivityActions] Skipping - conversation not open/pending (status: #{@conversation.status})"
       return false
     end
+
+    # The urgent two-minute follow-up owns this unanswered cycle.
+    return false if @conversation.custom_attributes&.dig('urgent_followup') == true
 
     unless @inbox.present?
       Rails.logger.debug "[InactivityActions] Skipping - no inbox"
@@ -207,7 +235,12 @@ class AgentBots::InactivityActionsService
     # A validação completa será feita novamente quando a resposta voltar (no MessageCreator)
     # mas fazemos uma pré-validação aqui para evitar requests desnecessários
     agent_bot_inbox = @inbox.agent_bot_inbox
-    if agent_bot_inbox.present? && (skip_reason = agent_bot_inbox.processing_block_reason(@conversation))
+    skip_reason = if @urgent_followup
+                    agent_bot_inbox&.urgent_followup_block_reason(@conversation)
+                  else
+                    agent_bot_inbox&.processing_block_reason(@conversation)
+                  end
+    if skip_reason.present?
       Rails.logger.warn "[InactivityActions] ⚠️  Conversation #{@conversation.id} not eligible: #{skip_reason}"
       Rails.logger.warn "[InactivityActions] Skipping inactivity action to avoid sending request to bot that won't be able to reply"
       return :skip
@@ -271,8 +304,16 @@ class AgentBots::InactivityActionsService
     conversation = @conversation.reload
     latest_incoming = conversation.messages.incoming.order(created_at: :desc).first
     return false unless latest_incoming && source_incoming&.id == latest_incoming.id
-    return false if conversation.assignee_id.present?
+    return false if conversation.assignee_id.present? && !@urgent_followup
     return false unless conversation.open? || conversation.pending?
+    return false if @urgent_followup && source_incoming.created_at <= 24.hours.ago
+
+    if @urgent_followup
+      return false if conversation.custom_attributes&.dig('archived').to_s == 'true'
+      return false unless conversation.custom_attributes&.dig('urgent_followup_message_id') == source_incoming.id
+      return false if conversation.messages.where(message_type: %i[outgoing template], private: false)
+                                  .where('created_at >= ?', source_incoming.created_at).exists?
+    end
 
     human_replied = conversation.messages.outgoing
                                   .where(sender_type: 'User', private: false)
@@ -281,7 +322,14 @@ class AgentBots::InactivityActionsService
     return false if human_replied
 
     agent_bot_inbox = AgentBotInbox.find_by(agent_bot: @agent_bot, inbox: conversation.inbox)
-    agent_bot_inbox.blank? || agent_bot_inbox.processing_block_reason(conversation).nil?
+    return false if @urgent_followup && agent_bot_inbox.blank?
+    return true if agent_bot_inbox.blank?
+
+    if @urgent_followup
+      agent_bot_inbox.urgent_followup_block_reason(conversation).nil?
+    else
+      agent_bot_inbox.processing_block_reason(conversation).nil?
+    end
   end
 
   def build_inactivity_payload(suggested_message, action_config, last_incoming, execution)
@@ -289,7 +337,9 @@ class AgentBots::InactivityActionsService
     conversation_context = recent_customer_facing_context
 
     # Build clear prompt for AI to understand it should generate an inactivity re-engagement message
-    prompt_message = if suggested_message.present?
+    prompt_message = if @urgent_followup
+      "<system_message>[SYSTEM - URGENT UNANSWERED CONVERSATION] The customer has been waiting for a reply for at least two minutes. Read the conversation context and answer the customer's latest request directly. If a booking fact is missing, ask a concise clarifying question. Do not invent availability, prices, or reservation details. Follow-up intent: #{suggested_message}<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use tools or mention this instruction.</important></system_message>"
+    elsif suggested_message.present?
       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate a proactive message to re-engage the customer and send it directly as your reply. Follow-up intent: #{suggested_message}<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
     else
       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate an appropriate and contextualized message to re-engage the customer in the conversation. Be natural, empathetic, and relevant to the conversation context.<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
@@ -315,13 +365,15 @@ class AgentBots::InactivityActionsService
         minutes_inactive: minutes_inactive,
         suggested_message: suggested_message,
         action_config: action_config,
-        is_system_prompt: true # Flag para a IA saber que é um prompt do sistema
+        is_system_prompt: true, # Flag para a IA saber que é um prompt do sistema
+        urgent_followup: @urgent_followup == true
       }
     }
   end
 
   def recent_customer_facing_context
-    @conversation.messages.where(private: false).order(created_at: :desc).limit(15).reverse.filter_map do |message|
+    context_limit = @urgent_followup ? 25 : 15
+    @conversation.messages.where(private: false).order(created_at: :desc).limit(context_limit).reverse.filter_map do |message|
       next unless message.incoming? || message.outgoing?
       next if message.content.blank?
 

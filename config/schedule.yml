@@ -52,6 +52,11 @@ pipeline_classification_scheduler_job:
   class: 'PipelineClassification::SchedulerJob'
   queue: low
 
+pipeline_classification_retention_job:
+  cron: '35 3 * * *'
+  class: 'PipelineClassification::RetentionJob'
+  queue: low
+
 modular_followup_scheduler_job:
   cron: '* * * * *'
   class: 'Followups::SchedulerJob'

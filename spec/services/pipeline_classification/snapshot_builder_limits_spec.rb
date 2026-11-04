@@ -11,7 +11,8 @@ RSpec.describe PipelineClassification::SnapshotBuilder do
 
   def message(text)
     instance_double(Message, inbox_id: 'inbox-id', attachments: instance_double(ActiveRecord::Relation, exists?: false),
-                             content_type: 'text', content_attributes: {}, content: text, incoming?: true, status: 'delivered')
+                             content_type: 'text', content_attributes: {}, content: text, incoming?: true, status: 'delivered',
+                             created_at: Time.zone.parse('2026-11-04 12:00:00'))
   end
 
   it 'accepts a complete realistic quote over 800 characters without truncating its final negation' do
@@ -21,11 +22,12 @@ RSpec.describe PipelineClassification::SnapshotBuilder do
     expect(serialized['content']).to eq(text)
     expect(serialized['content']).to end_with('Não confirmei a compra.')
     expect(described_class::MAX_BYTES).to eq(12 * 1024)
-    expect(described_class::MAX_MESSAGES).to eq(8)
+    expect(described_class::MAX_MESSAGES).to eq(20)
+    expect(serialized['created_at']).to eq('2026-11-04T12:00:00Z')
   end
 
   it 'rejects a message above 2000 characters as a whole' do
     expect { builder.send(:serialize, message('a' * 2001), 0) }
-      .to raise_error(Followups::SnapshotBuilder::Unsafe, 'snapshot_message_too_long')
+      .to raise_error(PipelineClassification::SnapshotBase::Unsafe, 'snapshot_message_too_long')
   end
 end

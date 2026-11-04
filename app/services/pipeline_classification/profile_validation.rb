@@ -8,10 +8,8 @@ module PipelineClassification
       unless profile['schema_version'] == 1 && profile['model'] == Catalog::MODEL && profile['question_version'] == 'pipeline_stage_v1'
         invalid!('unsupported schema or model')
       end
-      invalid!('enabled/mode mismatch') unless [true,
-                                                false].include?(profile['enabled']) && %w[off
-                                                                                          observe].include?(profile['mode']) &&
-                                               profile['enabled'] == (profile['mode'] == 'observe')
+      invalid!('enabled/mode mismatch') unless [true, false].include?(profile['enabled']) && %w[off observe auto].include?(profile['mode']) &&
+                                               profile['enabled'] == (profile['mode'] != 'off')
       text!(profile['purpose'], allow_empty: !profile['enabled'])
       { 'debounce_ms' => 250..300_000, 'snapshot_ttl_seconds' => 30..3600, 'result_ttl_seconds' => 30..3600 }.each do |key, range|
         invalid!("invalid #{key}") unless profile[key].is_a?(Integer) && range.cover?(profile[key])
@@ -22,13 +20,15 @@ module PipelineClassification
         invalid!('invalid inbox scope')
       end
       invalid!('inbox scope required') if profile['enabled'] && inboxes.empty?
-      invalid!('invalid thresholds') unless profile['thresholds'].is_a?(Hash) && profile['thresholds'].keys == ['stage_candidate'] &&
-                                            Followups::QuestionValidator.probability?(profile.dig(
-                                                                                        'thresholds', 'stage_candidate'
-                                                                                      ))
+      expected_thresholds = %w[pipeline_candidate stage_candidate]
+      invalid!('invalid thresholds') unless profile['thresholds'].is_a?(Hash) && profile['thresholds'].keys.sort == expected_thresholds &&
+                                            expected_thresholds.all? { |key| QuestionValidator.probability?(profile.dig('thresholds', key)) }
+      routing_ids = profile['routing_pipeline_ids']
+      invalid!('invalid routing pipeline scope') unless routing_ids.is_a?(Array) && routing_ids.size <= Catalog::LIMITS[:max_pipelines] &&
+                                                        routing_ids.uniq.size == routing_ids.size && routing_ids.all?(String)
       invalid!('invalid context_sources') unless profile['context_sources'].is_a?(Hash) && (profile['context_sources'].keys - ['fields']).empty?
-      Followups::SnapshotContext.validate!(profile['context_sources'])
-    rescue Followups::SnapshotContext::Invalid
+      SnapshotContext.validate!(profile['context_sources'])
+    rescue SnapshotContext::Invalid
       invalid!('invalid context_sources')
     end
 

@@ -143,6 +143,7 @@ class Message < ApplicationRecord
   after_update :invalidate_followup_content
   after_create_commit -> { PipelineClassification::ModelHooks.message_created(self) }
   after_update_commit -> { PipelineClassification::ModelHooks.message_updated(self) }
+  after_destroy_commit -> { PipelineClassification::ModelHooks.message_destroyed(self) }
   after_create_commit :publish_message_created, unless: :imported?
   after_create_commit :sync_message_event, unless: :imported?
   after_update_commit :dispatch_update_event

@@ -9,27 +9,32 @@ module PipelineClassification
 
     # List every public-message invalidation trigger before notifying the lifecycle once.
     def self.message_created(message) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-      return unless ready? && !message.imported? && !message.private?
+      return unless ready? && classification_message?(message) && !message.private? && !message.failed? && !invalid_content?(message)
 
       conversation = Conversation.find_by(id: message.conversation_id)
       return unless conversation
 
       if message.incoming?
         Lifecycle.incoming!(conversation: conversation, message: message)
-      elsif message.outgoing? && message.source_id.present? && !message.failed?
+      elsif message.outgoing? && !message.failed?
         Lifecycle.invalidate!(conversation: conversation, reason: 'public_outbound_changed')
       end
     end
 
     # List every public-message invalidation trigger before notifying the lifecycle once.
     def self.message_updated(message) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-      return unless ready? && !message.imported?
+      return unless ready? && classification_message?(message)
       return if message.private? && !message.saved_changes.key?('private')
 
       fields = %w[content content_type private message_type source_id]
       changed = message.saved_changes.keys.intersect?(fields)
       status_change = message.saved_changes['status']
-      changed ||= status_change&.map(&:to_s)&.include?('failed')
+      if status_change
+        previous_status, current_status = status_change.map(&:to_s)
+        accepted_statuses = %w[sent delivered read]
+        changed ||= previous_status == 'failed' && accepted_statuses.include?(current_status)
+        changed ||= current_status == 'failed'
+      end
       %w[content_attributes additional_attributes].each do |key|
         next unless message.saved_changes[key]
 
@@ -40,6 +45,24 @@ module PipelineClassification
 
       conversation = Conversation.find_by(id: message.conversation_id)
       Lifecycle.invalidate!(conversation: conversation, reason: 'public_message_changed') if conversation
+    end
+
+    def self.message_destroyed(message)
+      return unless ready? && classification_message?(message) && !message.private? && (message.incoming? || message.outgoing?)
+
+      conversation = Conversation.find_by(id: message.conversation_id)
+      Lifecycle.invalidate!(conversation: conversation, reason: 'public_message_deleted') if conversation
+    end
+
+    # Stays Bridge records live channel events as imported and carries their
+    # original timestamp. Historical imports stay outside the event trigger.
+    def self.classification_message?(message)
+      !message.imported? || message.content_attributes.to_h.key?('external_created_at')
+    end
+
+    def self.invalid_content?(message)
+      attributes = message.content_attributes.to_h.stringify_keys
+      INVALID_CONTENT_FLAGS.any? { |field| attributes[field] == true || attributes[field] == 'true' }
     end
 
     def self.conversation_updated(conversation)
@@ -74,6 +97,7 @@ module PipelineClassification
 
     def self.pipeline_item_changed(item)
       return unless ready?
+      return if item.pipeline_classification_move
 
       fields = %w[pipeline_stage_id pipeline_id completed_at conversation_id]
       return unless item.destroyed? || item.previously_new_record? || item.saved_changes.keys.intersect?(fields)

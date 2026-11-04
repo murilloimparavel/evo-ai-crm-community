@@ -46,8 +46,11 @@ RSpec.describe PipelineClassification::Evaluator do
 
   # Build the real isolated catalog and conversation required by cross-connection fencing tests.
   def runtime_result # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-    InstallationConfig.create!(name: 'PIPELINE_CLASSIFICATION_SETTINGS', value: { 'max_attempt_cost_usd' => 0.01 })
-    InstallationConfig.create!(name: 'FOLLOWUP_SETTINGS', value: { 'budget_timezone' => 'UTC', 'daily_usd' => 1.0, 'daily_conversations' => 10 })
+    InstallationConfig.create!(name: 'PIPELINE_CLASSIFICATION_SETTINGS', value: {
+                                 'online_enabled' => true, 'privacy_reviewed' => true, 'language_validated' => true,
+                                 'billing_ceiling_verified' => true, 'retention_days' => 30, 'max_attempt_cost_usd' => 0.01,
+                                 'budget_timezone' => 'UTC', 'daily_usd' => 1.0, 'daily_conversations' => 10
+                               })
     user = User.create!(name: 'Worker operator', email: "worker-#{SecureRandom.hex(4)}@example.test")
     channel = Channel::WebWidget.create!(website_url: 'https://synthetic.example.test')
     inbox = Inbox.create!(name: 'Workers', channel: channel, enable_auto_assignment: false)
@@ -73,7 +76,10 @@ RSpec.describe PipelineClassification::Evaluator do
 
   def typed_response(choice)
     { ok: true, model: PipelineClassification::Catalog::MODEL,
-      answers: { 'stage_candidate' => { 'type' => 'choice', 'choice' => choice, 'confidence' => 1.0 } }, usage_known: true, input_tokens: 100,
+      answers: {
+        'pipeline_candidate' => { 'type' => 'choice', 'choice' => 'pipeline_1', 'confidence' => 1.0 },
+        'stage_candidate' => { 'type' => 'choice', 'choice' => choice, 'confidence' => 1.0 }
+      }, usage_known: true, input_tokens: 100,
       cost_known: true, cost_usd: 0.0000042 }
   end
 
@@ -89,7 +95,10 @@ RSpec.describe PipelineClassification::Evaluator do
       entered << true
       release.pop
       { ok: true, model: PipelineClassification::Catalog::MODEL,
-        answers: { 'stage_candidate' => { 'type' => 'choice', 'choice' => 'stage_1', 'confidence' => 1.0 } }, usage_known: true,
+        answers: {
+          'pipeline_candidate' => { 'type' => 'choice', 'choice' => 'pipeline_1', 'confidence' => 1.0 },
+          'stage_candidate' => { 'type' => 'choice', 'choice' => 'stage_1', 'confidence' => 1.0 }
+        }, usage_known: true,
         input_tokens: 100, cost_known: true, cost_usd: 0.0000042 }
     end
     worker = lambda do
@@ -107,7 +116,7 @@ RSpec.describe PipelineClassification::Evaluator do
     first.value
     second.value
     expect(calls.size).to eq(1)
-    expect(FollowupBudgetReservation.where(subject: row).count).to eq(1)
+    expect(PipelineClassificationBudgetReservation.where(pipeline_classification_result: row).count).to eq(1)
     expect(row.reload.status).to eq('classified')
   ensure
     release << true if release
@@ -143,7 +152,7 @@ RSpec.describe PipelineClassification::Evaluator do
     first.value
     expect(row.reload.reason).to eq('no_candidate')
     expect(row.fence_token).to eq(2)
-    expect(FollowupBudgetReservation.where(subject: row, status: 'settled').count).to eq(2)
+    expect(PipelineClassificationBudgetReservation.where(pipeline_classification_result: row, status: 'settled').count).to eq(2)
   ensure
     release << true if release
     first&.join(5)

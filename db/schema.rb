@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_11_03_130000) do
+ActiveRecord::Schema[7.1].define(version: 2026_11_04_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -471,6 +471,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_03_130000) do
     t.index ["contact_inbox_id"], name: "index_conversations_on_contact_inbox_id"
     t.index ["display_id"], name: "index_conversations_on_display_id", unique: true
     t.index ["first_reply_created_at"], name: "index_conversations_on_first_reply_created_at"
+    t.index ["id"], name: "index_conversations_urgent_followup", where: "((custom_attributes ->> 'urgent_followup'::text) = 'true'::text)"
     t.index ["inbox_id", "status", "assignee_id"], name: "conv_inbid_stat_asgnid_idx"
     t.index ["inbox_id", "status", "last_activity_at"], name: "index_conversations_on_inbox_status_last_activity", order: { last_activity_at: "DESC NULLS LAST" }
     t.index ["inbox_id"], name: "index_conversations_on_inbox_id"
@@ -479,7 +480,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_03_130000) do
     t.index ["status", "priority"], name: "index_conversations_on_status_and_priority"
     t.index ["status"], name: "index_conversations_on_status"
     t.index ["team_id"], name: "index_conversations_on_team_id"
-    t.index ['id'], name: 'index_conversations_urgent_followup', where: '((custom_attributes ->> \'urgent_followup\'::text) = \'true\'::text)'
     t.index ["uuid"], name: "index_conversations_on_uuid", unique: true
     t.index ["waiting_since"], name: "index_conversations_on_waiting_since"
   end
@@ -1147,6 +1147,35 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_03_130000) do
     t.index ["uid"], name: "index_oauth_applications_on_uid", unique: true
   end
 
+  create_table "pipeline_classification_budget_days", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "scope_key", null: false
+    t.date "budget_date", null: false
+    t.string "timezone", null: false
+    t.decimal "reserved_usd", precision: 16, scale: 8, default: "0.0", null: false
+    t.decimal "spent_usd", precision: 16, scale: 8, default: "0.0", null: false
+    t.jsonb "conversation_ids", default: [], null: false
+    t.integer "conversation_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["budget_date"], name: "index_pipeline_classification_budget_days_on_budget_date"
+    t.index ["scope_key", "budget_date"], name: "idx_pipeline_classification_budget_day", unique: true
+  end
+
+  create_table "pipeline_classification_budget_reservations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "pipeline_classification_budget_day_id", null: false
+    t.uuid "pipeline_classification_result_id", null: false
+    t.integer "attempt_number", null: false
+    t.decimal "reserved_usd", precision: 16, scale: 8, null: false
+    t.decimal "actual_usd", precision: 16, scale: 8
+    t.integer "input_tokens"
+    t.string "status", default: "reserved", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["pipeline_classification_budget_day_id"], name: "idx_on_pipeline_classification_budget_day_id_02e8be132a"
+    t.index ["pipeline_classification_result_id", "attempt_number"], name: "idx_pipeline_classification_reservation_attempt", unique: true
+    t.index ["pipeline_classification_result_id"], name: "idx_on_pipeline_classification_result_id_ca50274a8a"
+  end
+
   create_table "pipeline_classification_catalogs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "pipeline_id", null: false
     t.bigint "catalog_version", null: false
@@ -1788,6 +1817,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_03_130000) do
   add_foreign_key "messages", "followup_executions"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
+  add_foreign_key "pipeline_classification_budget_reservations", "pipeline_classification_budget_days", on_delete: :restrict
+  add_foreign_key "pipeline_classification_budget_reservations", "pipeline_classification_results", on_delete: :cascade
   add_foreign_key "pipeline_classification_catalogs", "pipelines", on_delete: :cascade
   add_foreign_key "pipeline_classification_catalogs", "users", column: "approved_by_id", on_delete: :nullify
   add_foreign_key "pipeline_classification_events", "conversations", on_delete: :cascade

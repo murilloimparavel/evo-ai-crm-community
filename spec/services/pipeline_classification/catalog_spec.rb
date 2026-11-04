@@ -76,11 +76,31 @@ RSpec.describe PipelineClassification::Catalog do
   it 'compiles one closed question with opaque aliases plus two explicit abstention options' do
     save_catalog
     compiled = described_class.new(pipeline.reload).compiled
-    expect(compiled['questions'].keys).to eq(['stage_candidate'])
-    expect(compiled['aliases'].values).to eq([stage.id])
+    expect(compiled['questions'].keys).to eq(%w[pipeline_candidate stage_candidate])
+    expect(compiled['pipeline_aliases'].values).to eq([pipeline.id])
+    expect(compiled['aliases'].values).to eq([{ 'pipeline_id' => pipeline.id, 'stage_id' => stage.id }])
     expect(compiled.dig('questions', 'stage_candidate', 'criteria').keys).to contain_exactly('stage_1', 'unclear', 'no_candidate')
-    expect(compiled.dig('questions', 'stage_candidate', 'instructions')).to include('never proves payment')
+    expect(compiled.dig('questions', 'stage_candidate', 'instructions')).to include('conversation claims never prove payment')
     expect(compiled.to_json).not_to include('trigger_value')
+  end
+
+  it 'always retains the source pipeline when routing targets list only destinations' do
+    target = Pipeline.create!(name: "Destination #{SecureRandom.hex(4)}", created_by: user)
+    target_stage = PipelineStage.create!(pipeline: target, name: 'Support', position: 1,
+                                         classification_profile: described_class::DEFAULT_STAGE.deep_dup.merge(
+                                           'classification_enabled' => true, 'definition' => 'Customer needs reservation support'
+                                         ))
+    target.update!(config: { 'classification' => described_class::DEFAULT_PROFILE.deep_dup.merge('purpose' => 'Route support requests') })
+    PipelineClassification::Editor.new(pipeline: target.reload,
+                                       actor: user).publish!(expected_hash: described_class.new(target).hash)
+    source_payload = payload
+    source_payload['classification'].merge!('purpose' => 'Route customer conversations', 'routing_pipeline_ids' => [target.id])
+
+    compiled = described_class.new(pipeline, payload: source_payload).compiled
+
+    expect(compiled.fetch('pipeline_aliases').values).to contain_exactly(pipeline.id, target.id)
+    expect(compiled.fetch('aliases').values).to include({ 'pipeline_id' => pipeline.id, 'stage_id' => stage.id },
+                                                        { 'pipeline_id' => target.id, 'stage_id' => target_stage.id })
   end
 
   it 'rejects foreign stages, invalid sources, free expressions, and unknown profile keys' do

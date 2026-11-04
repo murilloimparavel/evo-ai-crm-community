@@ -2,7 +2,7 @@ require 'rails_helper'
 
 RSpec.describe PipelineClassification::Evaluator do
   # Build the real standalone business fixture without campaign/template shortcuts.
-  def business(name: 'Sales', debounce: 2000) # rubocop:disable Metrics/AbcSize
+  def business(name: 'Sales', debounce: 2000, mode: 'observe') # rubocop:disable Metrics/AbcSize
     user = User.create!(name: 'Synthetic operator', email: "pipeline-#{SecureRandom.hex(5)}@example.test")
     channel = Channel::WebWidget.create!(website_url: 'https://synthetic.example.test')
     inbox = Inbox.create!(name: name, channel: channel, enable_auto_assignment: false)
@@ -13,7 +13,7 @@ RSpec.describe PipelineClassification::Evaluator do
     stage = PipelineStage.create!(pipeline: pipeline, name: 'Considering', position: 1)
     item = PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, conversation: conversation)
     profile = PipelineClassification::Catalog::DEFAULT_PROFILE.deep_dup.merge('purpose' => "Classify #{name} intent", 'enabled' => true,
-                                                                              'mode' => 'observe', 'inbox_ids' => [inbox.id],
+                                                                              'mode' => mode, 'inbox_ids' => [inbox.id],
                                                                               'debounce_ms' => debounce)
     stage_profile = PipelineClassification::Catalog::DEFAULT_STAGE.deep_dup.merge('classification_enabled' => true,
                                                                                   'definition' => 'Customer is considering available options')
@@ -28,8 +28,9 @@ RSpec.describe PipelineClassification::Evaluator do
     InstallationConfig.create!(name: 'PIPELINE_CLASSIFICATION_SETTINGS',
                                value: { 'online_enabled' => true, 'privacy_reviewed' => true, 'language_validated' => true,
                                         'billing_ceiling_verified' => true,
-                                        'retention_days' => 30, 'max_attempt_cost_usd' => 0.01 })
-    InstallationConfig.create!(name: 'FOLLOWUP_SETTINGS', value: { 'budget_timezone' => 'UTC', 'daily_usd' => 1.0, 'daily_conversations' => 20 })
+                                        'automatic_moves_enabled' => true,
+                                        'retention_days' => 30, 'max_attempt_cost_usd' => 0.01,
+                                        'budget_timezone' => 'UTC', 'daily_usd' => 1.0, 'daily_conversations' => 20 })
   end
 
   def incoming(business, text: 'Show me the available options', created_at: Time.current)
@@ -49,9 +50,12 @@ RSpec.describe PipelineClassification::Evaluator do
     PipelineClassification::DebouncedClassifier.new(state: row_state, generation: row_state.generation, now: row_state.due_at + 0.01).call
   end
 
-  def response(choice: 'stage_1', confidence: 1.0, **overrides)
+  def response(choice: 'stage_1', confidence: 1.0, pipeline_choice: 'pipeline_1', pipeline_confidence: confidence, **overrides)
     { ok: true, model: PipelineClassification::Catalog::MODEL,
-      answers: { 'stage_candidate' => { 'type' => 'choice', 'choice' => choice, 'confidence' => confidence } }, input_tokens: 100,
+      answers: {
+        'pipeline_candidate' => { 'type' => 'choice', 'choice' => pipeline_choice, 'confidence' => pipeline_confidence },
+        'stage_candidate' => { 'type' => 'choice', 'choice' => choice, 'confidence' => confidence }
+      }, input_tokens: 100,
       usage_known: true, cost_known: true, cost_usd: 0.0000042 }.merge(overrides)
   end
 
@@ -67,7 +71,7 @@ RSpec.describe PipelineClassification::Evaluator do
   end
 
   # Keep the complete approval/race lifecycle and its observable side effects in one regression example.
-  it 'classifies without any campaign, template, evidence or action and records real usage' do # rubocop:disable RSpec/MultipleExpectations
+  it 'classifies without any campaign, template, evidence or action and records real usage' do
     b = business
     incoming(b)
     row = due_result(b)
@@ -75,10 +79,8 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(row.reload.status).to eq('classified')
     expect(row.recommended_stage_id).to eq(b[:stage].id)
     expect(row.decision['financial_proof']).to be(false)
-    expect(FollowupCampaign.count).to eq(0)
-    expect(FollowupTemplate.count).to eq(0)
     expect(b[:item].reload.pipeline_stage_id).to eq(b[:stage].id)
-    expect(FollowupBudgetReservation.where(subject: row).count).to eq(1)
+    expect(PipelineClassificationBudgetReservation.where(pipeline_classification_result: row).count).to eq(1)
   end
 
   it 'debounces each pipeline independently and accepts equal-timestamp events by serialized order' do
@@ -110,7 +112,7 @@ RSpec.describe PipelineClassification::Evaluator do
     second = evaluate(row)
     expect(first).to have_received(:call).once
     expect(second).not_to have_received(:call)
-    expect(FollowupBudgetReservation.where(subject: row).count).to eq(1)
+    expect(PipelineClassificationBudgetReservation.where(pipeline_classification_result: row).count).to eq(1)
   end
 
   it 'preserves billed usage and invalidates a result when a new incoming arrives during HTTP' do
@@ -119,7 +121,7 @@ RSpec.describe PipelineClassification::Evaluator do
     row = due_result(b)
     evaluate(row) { incoming(b, text: 'Can we discuss support instead?') }
     expect(row.reload.status).to eq('cancelled')
-    expect(FollowupBudgetReservation.find_by!(subject: row).status).to eq('settled')
+    expect(PipelineClassificationBudgetReservation.find_by!(pipeline_classification_result: row).status).to eq('settled')
     expect(state(b).due_at).to be_present
   end
 
@@ -129,7 +131,7 @@ RSpec.describe PipelineClassification::Evaluator do
     row = due_result(b)
     evaluate(row) { b[:stage].update!(name: 'Renamed stage') }
     expect(row.reload.status).to eq('cancelled')
-    expect(FollowupBudgetReservation.find_by!(subject: row).status).to eq('settled')
+    expect(PipelineClassificationBudgetReservation.find_by!(pipeline_classification_result: row).status).to eq('settled')
   end
 
   it 'abstains on unclear, insufficient confidence, unexpected model and unallowed alias' do
@@ -154,14 +156,14 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(row.recommended_stage_id).to be_nil
   end
 
-  it 'rejects alleged payment before HTTP and does not infer financial proof from CRM fields' do
+  it 'classifies payment claims without treating them as financial proof' do
     b = business
     incoming(b, text: 'Já paguei o pix e enviei o comprovante')
     row = due_result(b)
     client = evaluate(row)
-    expect(client).not_to have_received(:call)
-    expect(row.reload.status).to eq('abstained')
-    expect(row.reason).to eq('payment_claim_requires_review')
+    expect(client).to have_received(:call).once
+    expect(row.reload.status).to eq('classified')
+    expect(row.decision['financial_proof']).to be(false)
   end
 
   it 'ignores unselected fields and invalidates selected enum/boolean changes' do
@@ -184,14 +186,24 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(state(b).generation).to eq(generation + 1)
   end
 
-  it 'guards human ownership and blocked contacts before any provider request' do
+  it 'classifies conversations owned by a human' do
     b = business
+    b[:conversation].update!(assignee: b[:user])
     incoming(b)
     row = due_result(b)
-    b[:conversation].update!(assignee: b[:user])
     client = evaluate(row)
-    expect(client).not_to have_received(:call)
-    expect(row.reload.status).to(satisfy { |status| %w[blocked cancelled].include?(status) })
+    expect(client).to have_received(:call).once
+    expect(row.reload.status).to eq('classified')
+  end
+
+  it 'debounces a new classification after a public outbound reply without a channel source id' do
+    b = business
+    incoming(b)
+    initial_generation = state(b).generation
+    b[:conversation].messages.create!(inbox: b[:inbox], message_type: :outgoing, status: :sent,
+                                      content: 'Resposta enviada pelo atendente')
+    expect(state(b).generation).to eq(initial_generation + 1)
+    expect(state(b).due_at).to be_present
   end
 
   it 'expires accepted results at the original snapshot deadline even when result TTL is longer' do
@@ -218,17 +230,19 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(state(b).source_incoming_message_id).to eq(last.id)
   end
 
-  it 'uses the last eight complete public messages and preserves the latest negation after long history' do
+  it 'uses the last twenty complete public messages without using the current card stage as evidence' do
     b = business
-    10.times { |index| incoming(b, text: "Earlier question number #{index}", created_at: Time.current + index.seconds) }
-    source = incoming(b, text: 'Não escolhi nenhuma opção e não confirmei a compra', created_at: 11.seconds.from_now)
+    22.times { |index| incoming(b, text: "Earlier question number #{index}", created_at: Time.current + index.seconds) }
+    source = incoming(b, text: 'Não escolhi nenhuma opção e não confirmei a compra', created_at: 23.seconds.from_now)
     row = due_result(b)
     snapshot = PipelineClassification::SnapshotBuilder.new(result: row, catalog: row.pipeline_classification_catalog, conversation: b[:conversation],
                                                            now: source.created_at + 1.second).call
     expect(snapshot[:state]).to be_present
     expect(snapshot[:state]['history_truncated']).to be(true)
-    expect(snapshot[:state]['messages'].size).to eq(8)
+    expect(snapshot[:state]['messages'].size).to eq(20)
     expect(snapshot[:state]['messages'].last['content']).to eq('Não escolhi nenhuma opção e não confirmei a compra')
+    expect(snapshot[:state]['messages'].last['created_at']).to be_present
+    expect(snapshot[:state]).not_to have_key('current_stage')
     expect(snapshot[:references][:source_incoming_message_id]).to eq(source.id)
   end
 
@@ -254,7 +268,7 @@ RSpec.describe PipelineClassification::Evaluator do
     incoming(b)
     row = due_result(b)
     reservation = PipelineClassification::Budget.new(offline: true).reserve!(subject: row, catalog: row.pipeline_classification_catalog)
-    reserved = reservation.followup_budget_day.reload.reserved_usd
+    reserved = reservation.pipeline_classification_budget_day.reload.reserved_usd
     row.update!(status: 'evaluating', fence_token: 1, attempt_count: 1, lease_expires_at: 30.seconds.from_now)
     # Native CRM removes cards before deleting a conversation. Simulate a bulk
     # or older writer lacking the new catalog hook, so FK retirement is tested
@@ -269,7 +283,7 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(row.reason).to eq('target_deleted')
     expect(row.fence_token).to eq(2)
     expect(reservation.reload.status).to eq('reserved')
-    expect(reservation.followup_budget_day.reload.reserved_usd).to eq(reserved)
+    expect(reservation.pipeline_classification_budget_day.reload.reserved_usd).to eq(reserved)
   end
 
   it 'settles a known response after target deletion during HTTP and never re-enqueues the orphan' do
@@ -283,7 +297,7 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(client).to have_received(:call).once
     expect(row.reload.status).to eq('cancelled')
     expect(row.reason).to match(/\A(?:target_deleted|pipeline_item_changed)\z/)
-    expect(FollowupBudgetReservation.find_by!(subject: row).status).to eq('settled')
+    expect(PipelineClassificationBudgetReservation.find_by!(pipeline_classification_result: row).status).to eq('settled')
     allow(PipelineClassification::EvaluateJob).to receive(:perform_later)
     2.times { PipelineClassification::SchedulerJob.perform_now }
     expect(PipelineClassification::EvaluateJob).not_to have_received(:perform_later)
@@ -344,7 +358,7 @@ RSpec.describe PipelineClassification::Evaluator do
     travel_back
   end
 
-  it 'applies the inbox ignored-label binding before any standalone provider request or budget reservation' do
+  it 'classifies independently of chatbot ignored-label and automation policies' do
     b = business
     label = Label.create!(title: "synthetic_block_#{SecureRandom.hex(4)}")
     bot = AgentBot.create!(name: 'Synthetic bot', bot_config: {})
@@ -354,11 +368,9 @@ RSpec.describe PipelineClassification::Evaluator do
     incoming(b)
     row = due_result(b)
     client = evaluate(row)
-    expect(client).not_to have_received(:call)
-    expect(row.reload.status).to eq('blocked')
-    expect(row.reason).to eq('inbox_bot_policy_block')
-    expect(FollowupBudgetReservation.where(subject: row)).to be_empty
-    expect(row.decision).not_to have_key('provider_latency_ms')
+    expect(client).to have_received(:call).once
+    expect(row.reload.status).to eq('classified')
+    expect(row.decision['provider_latency_ms']).to be_a(Numeric)
   end
 
   it 'measures provider latency using its monotonic clock and ignores provider-supplied latency metadata' do
@@ -392,7 +404,7 @@ RSpec.describe PipelineClassification::Evaluator do
                         }).call
     expect(row.reload.status).to eq('abstained')
     expect(row.decision['provider_latency_ms']).to eq(250.0)
-    expect(FollowupBudgetReservation.find_by!(subject: row).status).to eq('reserved')
+    expect(PipelineClassificationBudgetReservation.find_by!(pipeline_classification_result: row).status).to eq('reserved')
   end
 
   # Keep the complete approval/race lifecycle and its observable side effects in one regression example.
@@ -404,7 +416,10 @@ RSpec.describe PipelineClassification::Evaluator do
     editor = PipelineClassification::Editor.new(pipeline: b[:pipeline].reload, actor: b[:user])
     editor.publish!(expected_hash: PipelineClassification::Catalog.new(b[:pipeline]).hash)
     compiled = PipelineClassification::Catalog.new(b[:pipeline]).compiled
-    expect(compiled['aliases'].values).to contain_exactly(b[:stage].id, other.id)
+    expect(compiled['aliases'].values).to contain_exactly(
+      { 'pipeline_id' => b[:pipeline].id, 'stage_id' => b[:stage].id },
+      { 'pipeline_id' => b[:pipeline].id, 'stage_id' => other.id }
+    )
     expect(compiled.dig('questions', 'stage_candidate', 'criteria')).to have_key('unclear')
     other.update!(position: 9)
     expect(PipelineClassification::Catalog.new(b[:pipeline].reload).compiled).to eq(compiled)
@@ -441,7 +456,7 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(row.reload.status).to eq('cancelled')
     expect(state(b).generation).to eq(initial_generation + 1)
     expect(state(b).context_digest).not_to eq(initial_digest)
-    reservation = FollowupBudgetReservation.find_by!(subject: row)
+    reservation = PipelineClassificationBudgetReservation.find_by!(pipeline_classification_result: row)
     expect(reservation.status).to eq('settled')
     expect(reservation.actual_usd).to eq(BigDecimal('0.0000042'))
     replacement = due_result(b)
@@ -478,7 +493,102 @@ RSpec.describe PipelineClassification::Evaluator do
     described_class.new(result: row, client: client, budget: PipelineClassification::Budget.new(offline: true)).call
     expect(client).to have_received(:call).once
     expect(row.reload.status).to eq('cancelled')
-    expect(FollowupBudgetReservation.find_by!(subject: row).status).to eq('settled')
+    expect(PipelineClassificationBudgetReservation.find_by!(pipeline_classification_result: row).status).to eq('settled')
     expect(PipelineClassification::Catalog.from_revision(row.pipeline_classification_catalog).compiled).to eq(approved)
+  end
+
+  it 'moves a fresh auto-mode recommendation once and records an automated stage movement' do
+    b = business(mode: 'auto')
+    next_stage = PipelineStage.create!(pipeline: b[:pipeline], name: 'Ready to book', position: 2,
+                                       classification_profile: PipelineClassification::Catalog::DEFAULT_STAGE.deep_dup.merge(
+                                         'classification_enabled' => true, 'definition' => 'Customer has decided to book'
+                                       ))
+    PipelineClassification::Editor.new(pipeline: b[:pipeline].reload,
+                                       actor: b[:user]).publish!(expected_hash: PipelineClassification::Catalog.new(b[:pipeline]).hash)
+    incoming(b, text: 'I am ready to book')
+    row = due_result(b)
+    aliases = PipelineClassification::Catalog.from_revision(row.pipeline_classification_catalog).compiled.fetch('aliases')
+    target_alias = aliases.find { |_key, value| value['stage_id'] == next_stage.id }.first
+    evaluate(row, response(choice: target_alias))
+
+    first = PipelineClassification::ApplyDecision.new(result: row.reload).call
+    second = PipelineClassification::ApplyDecision.new(result: row.reload).call
+
+    expect(first['status']).to eq('applied'), first.inspect
+    expect(second['status']).to eq('applied')
+    expect(b[:item].reload.pipeline_stage_id).to eq(next_stage.id), first.inspect
+    movement = b[:item].stage_movements.order(:created_at).last
+    expect(movement.movement_type).to eq('automated')
+    expect(movement.notes).to include("result=#{row.id}")
+    expect(row.reload.decision.dig('application', 'status')).to eq('applied')
+  end
+
+  it 'moves across pipelines using the frozen target catalog and records a cross-pipeline audit' do # rubocop:disable RSpec/ExampleLength
+    source = business(mode: 'auto')
+    target_pipeline = Pipeline.create!(name: "Support #{SecureRandom.hex(5)}", created_by: source[:user])
+    target_stage = PipelineStage.create!(pipeline: target_pipeline, name: 'Reservation support', position: 1,
+                                         classification_profile: PipelineClassification::Catalog::DEFAULT_STAGE.deep_dup.merge(
+                                           'classification_enabled' => true, 'definition' => 'Customer needs help with an existing reservation'
+                                         ))
+    target_profile = PipelineClassification::Catalog::DEFAULT_PROFILE.deep_dup.merge(
+      'enabled' => true, 'mode' => 'observe', 'purpose' => 'Classify active reservation support', 'inbox_ids' => [source[:inbox].id]
+    )
+    target_pipeline.update!(config: { 'classification' => target_profile })
+    PipelineClassification::Editor.new(pipeline: target_pipeline.reload,
+                                       actor: source[:user]).publish!(expected_hash: PipelineClassification::Catalog.new(target_pipeline).hash)
+    source_profile = source[:pipeline].config['classification'].merge('routing_pipeline_ids' => [source[:pipeline].id, target_pipeline.id])
+    source[:pipeline].update!(config: { 'classification' => source_profile })
+    PipelineClassification::Editor.new(pipeline: source[:pipeline].reload,
+                                       actor: source[:user]).publish!(expected_hash: PipelineClassification::Catalog.new(source[:pipeline]).hash)
+
+    incoming(source, text: 'I already booked and need help with the reservation')
+    row = due_result(source)
+    compiled = PipelineClassification::Catalog.from_revision(row.pipeline_classification_catalog).compiled
+    pipeline_choice = compiled.fetch('pipeline_aliases').find { |_key, id| id == target_pipeline.id }.first
+    stage_choice = compiled.fetch('aliases').find do |_key, value|
+      value['pipeline_id'] == target_pipeline.id && value['stage_id'] == target_stage.id
+    end.first
+    evaluate(row, response(pipeline_choice: pipeline_choice, choice: stage_choice))
+
+    application = PipelineClassification::ApplyDecision.new(result: row.reload).call
+    expect(application['status']).to eq('applied')
+    expect(source[:item].reload.pipeline_id).to eq(target_pipeline.id)
+    expect(source[:item].pipeline_stage_id).to eq(target_stage.id)
+    movement = source[:item].stage_movements.order(:created_at).last
+    expect(movement.movement_type).to eq('cross_pipeline')
+    expect(movement.notes).to include("result=#{row.id}")
+  end
+
+  it 'honors the installation level automatic movement pause' do
+    b = business(mode: 'auto')
+    installation = InstallationConfig.find_by!(name: 'PIPELINE_CLASSIFICATION_SETTINGS')
+    installation.update!(value: installation.value.merge('automatic_moves_enabled' => false))
+    incoming(b)
+    row = due_result(b)
+    evaluate(row)
+
+    outcome = PipelineClassification::ApplyDecision.new(result: row.reload).call
+
+    expect(outcome).to include('status' => 'skipped', 'reason' => 'automatic_moves_paused')
+    expect(b[:item].reload.pipeline_stage_id).to eq(b[:stage].id)
+  end
+
+  it 'restarts classification when an outgoing message transitions from failed to delivered' do
+    b = business
+    incoming(b)
+    outgoing = b[:conversation].messages.create!(inbox: b[:inbox], message_type: :outgoing, content: 'We will help', status: :failed)
+    initial_generation = state(b).generation
+    outgoing.update!(status: :sent)
+    expect(state(b).generation).to eq(initial_generation + 1)
+    expect(state(b).due_at).to be_present
+  end
+
+  it 'invalidates a pending snapshot when a public message is deleted' do
+    b = business
+    incoming(b)
+    row = due_result(b)
+    source = b[:conversation].messages.find(row.source_incoming_message_id)
+    source.destroy!
+    expect(row.reload.status).to eq('cancelled')
   end
 end

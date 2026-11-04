@@ -14,13 +14,7 @@ module PipelineClassification
       profile = catalog.snapshot.fetch('classification')
       return 'inbox_not_allowed' unless profile['inbox_ids'].include?(conversation.inbox_id)
       return 'closed_conversation' unless %w[open pending].include?(conversation.status)
-      return 'human_assignee' if conversation.assignee_id.present? || conversation.team_id.present?
       return 'contact_blocked' unless conversation.contact && !conversation.contact.reload.blocked?
-
-      binding = conversation.inbox.agent_bot_inbox
-      if binding && !(binding.active? && !binding.has_ignored_labels?(conversation) && !binding.processing_block_reason(conversation))
-        return 'inbox_bot_policy_block'
-      end
 
       items = conversation.pipeline_items.where(pipeline_id: pipeline.id, completed_at: nil)
       return 'missing_pipeline_item' unless items.count == 1
@@ -37,10 +31,6 @@ module PipelineClassification
       return 'missing_source_incoming' unless incoming
       return 'incoming_changed' if conversation.messages.incoming.where(private: false).exists?(['created_at > ?', incoming.created_at])
 
-      human = conversation.messages.outgoing.where(private: false).where('created_at >= ?', incoming.created_at)
-      if human.exists?(sender_type: 'User') || human.where("content_attributes ->> 'whatsapp_echo_message' = 'true'").exists?
-        return 'human_intervention'
-      end
       return 'classification_expired' unless @row.expires_at && @row.expires_at > now
 
       nil

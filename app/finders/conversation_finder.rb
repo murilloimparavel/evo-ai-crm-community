@@ -161,6 +161,12 @@ class ConversationFinder
     query.where(status: @params[:status] || DEFAULT_STATUS)
   end
 
+  def apply_urgent_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:urgent_followup])
+
+    query.where("conversations.custom_attributes->>'urgent_followup' = 'true'")
+  end
+
   def apply_team_filter(query)
     return query unless @params[:team_id]
 
@@ -193,11 +199,6 @@ class ConversationFinder
       query
     end
 
-    def apply_urgent_filter(query)
-      return query unless ActiveModel::Type::Boolean.new.cast(@params[:urgent_followup])
-
-      query.where("conversations.custom_attributes->>'urgent_followup' = 'true'")
-    end
   end
 
   # Chip "Não lidas": conversas com mensagens incoming não lidas pelo agente.
@@ -276,3 +277,4 @@ class ConversationFinder
 end
 
 ConversationFinder.prepend_mod_with('ConversationFinder')
+# rubocop:enable Metrics/ClassLength

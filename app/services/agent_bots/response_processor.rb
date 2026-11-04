@@ -124,6 +124,8 @@ class AgentBots::ResponseProcessor
   # Inactivity requests can take long enough for a customer or human agent to
   # reply while the model is generating. Revalidate at the final message-write
   # boundary so an obsolete nudge cannot be delivered.
+  # Revalidate the urgent window before writing an asynchronous bot response.
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
   def stale_inactivity_response?(conversation)
     metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']
     return false unless metadata.present?
@@ -156,6 +158,8 @@ class AgentBots::ResponseProcessor
     Rails.logger.error "[AgentBot HTTP] Could not validate inactivity response: #{e.class}: #{e.message}"
     true
   end
+
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
 
   def inactivity_execution_id
     metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']

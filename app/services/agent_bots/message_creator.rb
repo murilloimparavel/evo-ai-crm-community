@@ -7,6 +7,7 @@ class AgentBots::MessageCreator
   # is present the reply may have a blank content (media-only message).
   # message_template_id: optional MessageTemplate to render (EVO-1235); when it
   # resolves, its rendered content replaces the provided inline content.
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil, media: nil,
                        message_template_id: nil, processed_params: {})
     return if content_attributes&.dig(:urgent_followup) && !urgent_followup_allowed?(conversation)
@@ -30,6 +31,8 @@ class AgentBots::MessageCreator
     Rails.logger.info "[AgentBot HTTP] Creating bot reply in conversation #{conversation.id} (#{media.size} media)"
     create_message_with_fallback(content, conversation, content_type: content_type, content_attributes: content_attributes, media: media)
   end
+
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   private
 
@@ -61,6 +64,7 @@ class AgentBots::MessageCreator
     nil
   end
 
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def conversation_eligible_for_bot_reply?(conversation, urgent_followup: false)
     # Find the AgentBotInbox configuration for this conversation's inbox
     agent_bot_inbox = AgentBotInbox.find_by(agent_bot: @agent_bot, inbox: conversation.inbox)
@@ -87,6 +91,8 @@ class AgentBots::MessageCreator
     Rails.logger.warn "[AgentBot HTTP] ❌ reply discarded - conv #{conversation.id}: #{skip_reason}"
     false
   end
+
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   def create_message_with_fallback(content, conversation, content_type:, content_attributes:, media: [])
     create_direct_message(content, conversation, content_type: content_type, content_attributes: content_attributes, media: media)

@@ -1,5 +1,6 @@
 class Webhooks::Trigger
   SUPPORTED_ERROR_HANDLE_EVENTS = %w[message_created message_updated].freeze
+  BRIDGE_ERROR_CODES = %w[STAYS_OUTBOUND_DISABLED STAYS_SEND_FAILED STAYS_DELIVERY_UNCERTAIN].freeze
 
   def initialize(url, payload, webhook_type)
     @url = url
@@ -70,7 +71,34 @@ class Webhooks::Trigger
   end
 
   def update_message_status(error)
-    Messages::StatusUpdateService.new(message, 'failed', error.message).perform
+    details = bridge_error_details(error) || {
+      code: 'WEBHOOK_DELIVERY_FAILED',
+      message: 'O webhook não confirmou o envio. Verifique o canal antes de tentar novamente.'
+    }
+    external_error = "#{details[:code]}: #{details[:message]}"
+    Messages::StatusUpdateService.new(message, 'failed', external_error).perform
+  end
+
+  # The Bridge response body is an untrusted boundary. Only accept known error
+  # codes and fixed local copy; never persist or display an arbitrary body.
+  def bridge_error_details(error)
+    response = error.respond_to?(:response) ? error.response : nil
+    body = response.respond_to?(:body) ? response.body : nil
+    parsed = JSON.parse(body.to_s)
+    code = parsed['error_code'].to_s
+    return unless BRIDGE_ERROR_CODES.include?(code)
+
+    message = case code
+              when 'STAYS_OUTBOUND_DISABLED'
+                'Envio para a Stays está desativado no Bridge. Nenhuma mensagem foi enviada.'
+              when 'STAYS_SEND_FAILED'
+                'A Stays rejeitou ou não aceitou a requisição de envio.'
+              when 'STAYS_DELIVERY_UNCERTAIN'
+                'Confirmação pendente: verifique a thread na Stays antes de qualquer reenvio.'
+              end
+    { code: code, message: message }
+  rescue JSON::ParserError, TypeError
+    nil
   end
 
   def message

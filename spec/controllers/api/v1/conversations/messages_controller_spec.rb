@@ -115,6 +115,31 @@ RSpec.describe Api::V1::Conversations::MessagesController, type: :controller do
     end
   end
 
+  describe '#retry — Stays bridge failures' do
+    let(:current_status) { 'failed' }
+
+    before do
+      allow(controller).to receive(:permitted_params).and_return(
+        ActionController::Parameters.new(id: 7).permit(:id)
+      )
+      allow(conversation).to receive(:custom_attributes).and_return({ 'stays_bridge_managed' => true })
+      allow(message_record).to receive(:content_attributes).and_return({ 'external_error' => 'WEBHOOK_DELIVERY_FAILED: Bridge response unavailable' })
+      allow(message_record).to receive(:outgoing?).and_return(true)
+      allow(message_record).to receive(:private?).and_return(false)
+      allow(message_record).to receive(:failed?).and_return(true)
+      allow(message_record).to receive(:source_id).and_return(nil)
+      allow(message_record).to receive(:with_lock) { |&block| block.call }
+    end
+
+    it 'does not replay a message ID already claimed by the Stays Bridge' do
+      expect(message_record).not_to receive(:update!)
+      expect(SendReplyJob).not_to receive(:perform_now)
+      expect(controller).to receive(:error_response)
+
+      controller.send(:retry)
+    end
+  end
+
   # A callback raising after the action rendered used to reach error_response,
   # which rendered a second time: DoubleRenderError, a generic 500, and the real
   # exception nowhere — not in the response, not in the log.

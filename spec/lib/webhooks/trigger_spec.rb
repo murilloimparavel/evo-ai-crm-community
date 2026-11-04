@@ -92,4 +92,45 @@ RSpec.describe Webhooks::Trigger do
       })
     end
   end
+
+  describe 'API Inbox delivery status' do
+    let(:message) { instance_double(Message, id: 'message-1') }
+    let(:payload) { { event: 'message_created', id: 'message-1' } }
+    let(:response) { instance_double(RestClient::Response, body: body) }
+
+    before do
+      allow(Message).to receive(:find_by).with(id: 'message-1').and_return(message)
+      allow(Messages::StatusUpdateService).to receive(:new) do |*_args|
+        instance_double(Messages::StatusUpdateService, perform: true)
+      end
+    end
+
+    it 'stores a fixed reconciliation instruction for an uncertain Stays response' do
+      body = { error_code: 'STAYS_DELIVERY_UNCERTAIN', accepted: false, result: 'uncertain' }.to_json
+      error = RestClient::Exceptions::GatewayTimeout.new(response)
+      allow(RestClient::Request).to receive(:execute).and_raise(error)
+
+      described_class.execute(url, payload, :api_inbox_webhook)
+
+      expect(Messages::StatusUpdateService).to have_received(:new).with(
+        message,
+        'failed',
+        'STAYS_DELIVERY_UNCERTAIN: Confirmação pendente: verifique a thread na Stays antes de qualquer reenvio.'
+      )
+    end
+
+    it 'does not persist arbitrary bridge response bodies' do
+      body = { error_code: 'SOMETHING_ELSE', detail: 'untrusted body' }.to_json
+      error = RestClient::Exceptions::GatewayTimeout.new(response)
+      allow(RestClient::Request).to receive(:execute).and_raise(error)
+
+      described_class.execute(url, payload, :api_inbox_webhook)
+
+      expect(Messages::StatusUpdateService).to have_received(:new).with(
+        message,
+        'failed',
+        'WEBHOOK_DELIVERY_FAILED: O webhook não confirmou o envio. Verifique o canal antes de tentar novamente.'
+      )
+    end
+  end
 end

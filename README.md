@@ -130,6 +130,10 @@ ACTIVE_STORAGE_SERVICE=local
 
 See `.env.example` for the full list.
 
+### Stays Bridge message imports
+
+The public API Inbox `POST .../messages/import` endpoint accepts only conversations marked as Stays Bridge managed and requires the channel-specific `X-Stays-Bridge-Token`. Configure `STAYS_BRIDGE_AIRBNB_IMPORT_TOKEN`, `STAYS_BRIDGE_BOOKINGCOM_IMPORT_TOKEN`, and/or `STAYS_BRIDGE_EXPEDIA_IMPORT_TOKEN` in the CRM secret store to match the corresponding `EVOCRM_<CHANNEL>_STAYS_BRIDGE_IMPORT_TOKEN` on the bridge. Use independent random secrets of at least 32 characters in production; do not put secret values in `.env.example` or source control. Missing or mismatched tokens are rejected.
+
 ---
 
 ## Available Scripts

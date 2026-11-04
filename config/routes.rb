@@ -728,7 +728,9 @@ Rails.application.routes.draw do
                   post :update_last_seen
                 end
 
-                resources :messages, only: [:index, :create, :update]
+                resources :messages, only: [:index, :create, :update] do
+                  post :import, on: :collection
+                end
                 # Dedicated outbound send: creates an :outgoing message, optionally
                 # rendered from a MessageTemplate (EVO-1235 [6.6]).
                 resources :outbound_messages, only: [:create]

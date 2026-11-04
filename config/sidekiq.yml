@@ -24,6 +24,7 @@
   - scheduled_actions
   - integrations
   - mailers
+  - pipeline_classification
   - action_mailbox_routing
   - low
   - bot_runtime

@@ -1,6 +1,6 @@
 module PipelineClassification
   class ApplyDecisionJob < ApplicationJob
-    queue_as :scheduled_jobs
+    queue_as :pipeline_classification
 
     def perform(id)
       result = PipelineClassificationResult.find_by(id: id)

@@ -50,12 +50,12 @@ agent_bots_inactivity_check_scheduler_job:
 pipeline_classification_scheduler_job:
   cron: '* * * * *'
   class: 'PipelineClassification::SchedulerJob'
-  queue: low
+  queue: pipeline_classification
 
 pipeline_classification_retention_job:
   cron: '35 3 * * *'
   class: 'PipelineClassification::RetentionJob'
-  queue: low
+  queue: pipeline_classification
 
 modular_followup_scheduler_job:
   cron: '* * * * *'

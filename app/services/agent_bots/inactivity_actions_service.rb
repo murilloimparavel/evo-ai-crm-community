@@ -5,6 +5,7 @@ class AgentBots::InactivityActionsService
     @inbox = conversation.inbox
   end
 
+  # rubocop:disable Metrics/AbcSize
   def process
     return unless should_process?
 
@@ -32,6 +33,8 @@ class AgentBots::InactivityActionsService
 
     execute_action(action_to_execute, last_incoming)
   end
+
+  # rubocop:enable Metrics/AbcSize
 
   # The urgent queue uses its own reserved step, leaving the configured
   # inactivity cadence untouched. A repeated scheduler pass reconciles a
@@ -461,12 +464,13 @@ class AgentBots::InactivityActionsService
       next unless current_for_followup_cycle?(last_incoming)
 
       executions = InactivityActionExecution.for_conversation(@conversation.id)
-                                           .where(source_incoming_message_id: last_incoming.id)
-      if action_index == -2
-        next if executions.pending.where.not(action_index: -2).exists?
-      else
-        next if executions.where(action_index: -2, execution_status: %w[pending sent]).exists?
-      end
+      executions = executions.where(source_incoming_message_id: last_incoming.id)
+      blocked = if action_index == -2
+                  executions.pending.where.not(action_index: -2).exists?
+                else
+                  executions.exists?(action_index: -2, execution_status: %w[pending sent])
+                end
+      next if blocked
 
       InactivityActionExecution.create!(
         conversation_id: @conversation.id,

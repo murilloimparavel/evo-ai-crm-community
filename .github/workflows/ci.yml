@@ -2,7 +2,6 @@ name: CRM CI
 
 on:
   pull_request:
-    branches: [main, develop]
   push:
     branches: [main, develop]
   schedule:
@@ -232,20 +231,38 @@ jobs:
   pr-gate:
     name: CRM required checks
     if: always()
-    needs: [ruby-quality, rspec, docker-build]
+    needs: [ruby-quality, rspec, docker-build, workflow-lint]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass
         env:
           QUALITY_RESULT: ${{ needs.ruby-quality.result }}
           RSPEC_RESULT: ${{ needs.rspec.result }}
+          WORKFLOW_RESULT: ${{ needs.workflow-lint.result }}
           DOCKER_RESULT: ${{ needs.docker-build.result }}
         run: |
           set -euo pipefail
-          for result in "$QUALITY_RESULT" "$RSPEC_RESULT" "$DOCKER_RESULT"; do
+          for result in "$QUALITY_RESULT" "$RSPEC_RESULT" "$DOCKER_RESULT" "$WORKFLOW_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "::error::A required CRM CI job did not succeed: $result"
               exit 1
             fi
           done
           echo "All CRM CI checks passed."
+
+  workflow-lint:
+    name: Validate GitHub Actions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: '1.24.4'
+          cache: false
+      - name: Install pinned actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate workflows
+        run: actionlint -shellcheck= -pyflakes=

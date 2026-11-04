@@ -101,6 +101,7 @@ RSpec.describe Conversations::FilterService do
 
     def row(key, operator, values)
       { 'attribute_key' => key, 'filter_operator' => operator, 'values' => values, 'query_operator' => 'AND' }
+        .with_indifferent_access
     end
 
     def filtered_ids(*rows)

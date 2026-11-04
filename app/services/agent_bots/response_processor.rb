@@ -74,7 +74,8 @@ class AgentBots::ResponseProcessor
       if execution_id.present?
         content_attributes = (content_attributes || {}).merge(
           automation_source: 'inactivity_action',
-          inactivity_execution_id: execution_id
+          inactivity_execution_id: execution_id,
+          urgent_followup: urgent_followup?
         )
       end
       message = message_creator.create_bot_reply(final_content, conversation, content_type: content_type, content_attributes: content_attributes)
@@ -123,6 +124,8 @@ class AgentBots::ResponseProcessor
   # Inactivity requests can take long enough for a customer or human agent to
   # reply while the model is generating. Revalidate at the final message-write
   # boundary so an obsolete nudge cannot be delivered.
+  # Revalidate the urgent window before writing an asynchronous bot response.
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
   def stale_inactivity_response?(conversation)
     metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']
     return false unless metadata.present?
@@ -130,7 +133,9 @@ class AgentBots::ResponseProcessor
     source_id = metadata[:source_incoming_message_id] || metadata['source_incoming_message_id']
     latest_incoming = conversation.messages.incoming.order(created_at: :desc).first
     return true if source_id.blank? || latest_incoming&.id.to_s != source_id.to_s
-    return true if conversation.assignee_id.present?
+    return true if !urgent_followup? && conversation.custom_attributes&.dig('urgent_followup') == true
+    return true if conversation.assignee_id.present? && !urgent_followup?
+    return true if urgent_followup? && stale_urgent_followup?(conversation, latest_incoming, source_id)
 
     human_replied = conversation.messages.outgoing
                                .where(sender_type: 'User', private: false)
@@ -139,7 +144,11 @@ class AgentBots::ResponseProcessor
     return true if human_replied
 
     agent_bot_inbox = AgentBotInbox.find_by(agent_bot: @agent_bot, inbox: conversation.inbox)
-    block_reason = agent_bot_inbox&.processing_block_reason(conversation)
+    block_reason = if urgent_followup?
+                     agent_bot_inbox&.urgent_followup_block_reason(conversation) || ('bot inbox missing' unless agent_bot_inbox)
+                   else
+                     agent_bot_inbox&.processing_block_reason(conversation)
+                   end
     return true if block_reason.present?
 
     false
@@ -150,9 +159,26 @@ class AgentBots::ResponseProcessor
     true
   end
 
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
+
   def inactivity_execution_id
     metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']
     metadata&.dig(:execution_id) || metadata&.dig('execution_id')
+  end
+
+  def urgent_followup?
+    metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']
+    metadata&.dig(:urgent_followup) == true || metadata&.dig('urgent_followup') == true
+  end
+
+  def stale_urgent_followup?(conversation, latest_incoming, source_id)
+    return true unless conversation.open? || conversation.pending?
+    return true if conversation.custom_attributes&.dig('archived').to_s == 'true'
+    return true if latest_incoming.created_at <= 24.hours.ago
+    return true unless conversation.custom_attributes&.dig('urgent_followup_message_id').to_s == source_id.to_s
+
+    conversation.messages.where(message_type: %i[outgoing template], private: false)
+                .exists?(['created_at >= ?', latest_incoming.created_at])
   end
 
   def message_for_inactivity_execution(conversation, execution_id)

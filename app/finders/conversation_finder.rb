@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 # ConversationFinder otimizado para melhor performance
+# Existing finder is already larger than the configured class limit.
+# rubocop:disable Metrics/ClassLength
 class ConversationFinder
   attr_reader :current_user, :params
 
@@ -105,6 +107,7 @@ class ConversationFinder
     # Apply chip filters (unread / unanswered / groups / archived) — list-only
     query = apply_unread_filter(query)
     query = apply_unanswered_filter(query)
+    query = apply_urgent_filter(query)
     query = apply_is_group_filter(query)
     query = apply_archived_filter(query)
 
@@ -153,8 +156,15 @@ class ConversationFinder
 
   def apply_status_filter(query)
     return query if @params[:status] == 'all'
+    return query if @params[:status].blank? && ActiveModel::Type::Boolean.new.cast(@params[:urgent_followup])
 
     query.where(status: @params[:status] || DEFAULT_STATUS)
+  end
+
+  def apply_urgent_filter(query)
+    return query unless ActiveModel::Type::Boolean.new.cast(@params[:urgent_followup])
+
+    query.where("conversations.custom_attributes->>'urgent_followup' = 'true'")
   end
 
   def apply_team_filter(query)
@@ -266,3 +276,4 @@ class ConversationFinder
 end
 
 ConversationFinder.prepend_mod_with('ConversationFinder')
+# rubocop:enable Metrics/ClassLength

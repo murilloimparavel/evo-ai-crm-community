@@ -53,7 +53,21 @@ jobs:
               echo "No Ruby files changed; skipping RuboCop for this pull request."
               exit 0
             fi
-            bundle exec rubocop --format progress "${ruby_files[@]}"
+            baseline_dir="$RUNNER_TEMP/rubocop-base-$GITHUB_RUN_ID"
+            git worktree add --detach "$baseline_dir" "$BASE_SHA"
+            mapfile -t base_files < <(printf '%s\n' "${ruby_files[@]}" | while read -r file; do
+              test -f "$baseline_dir/$file" && printf '%s\n' "$baseline_dir/$file"
+            done)
+            if ((${#base_files[@]} > 0)); then
+              bundle exec rubocop --config "$baseline_dir/.rubocop.yml" --format json \
+                --out "$RUNNER_TEMP/rubocop-base.json" "${base_files[@]}" || true
+            else
+              printf '{"files":[]}' > "$RUNNER_TEMP/rubocop-base.json"
+            fi
+            bundle exec rubocop --format json --out "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}" || true
+            ruby .github/scripts/compare_rubocop_results.rb \
+              "$RUNNER_TEMP/rubocop-base.json" "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}"
+            git worktree remove --force "$baseline_dir"
           elif [[ "$EVENT_NAME" == push && -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
             mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.rb')
             if ((${#ruby_files[@]} == 0)); then

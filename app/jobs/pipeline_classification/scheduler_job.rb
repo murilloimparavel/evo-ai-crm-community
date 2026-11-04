@@ -1,6 +1,6 @@
 module PipelineClassification
   class SchedulerJob < ApplicationJob
-    queue_as :scheduled_jobs
+    queue_as :pipeline_classification
     def perform
       now = Time.current
       Evaluator.retire_orphans!

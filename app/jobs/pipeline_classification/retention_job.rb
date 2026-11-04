@@ -1,6 +1,6 @@
 module PipelineClassification
   class RetentionJob < ApplicationJob
-    queue_as :low
+    queue_as :pipeline_classification
     TERMINAL_STATUSES = %w[classified abstained blocked cancelled].freeze
     BATCH_SIZE = 1000
 

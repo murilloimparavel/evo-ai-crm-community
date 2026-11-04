@@ -125,6 +125,16 @@ class AgentBotInbox < ApplicationRecord
     nil
   end
 
+  # An unanswered urgent conversation may still be open or assigned to a
+  # human. Keep label safeguards, but let the one-off follow-up use the bot.
+  def urgent_followup_block_reason(conversation)
+    return 'bot inbox inactive' unless active?
+    return 'ignored_label present' if has_ignored_labels?(conversation)
+    return 'no allowed label' unless allows_conversation_labels?(conversation)
+
+    nil
+  end
+
   # Get the appropriate agent bot for a conversation
   # For Facebook post conversations, check if comment replies are enabled
   # and if a specific agent bot is configured for comments

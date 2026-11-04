@@ -30,7 +30,7 @@ RSpec.describe AgentBots::InactivityActionsService do
 
   describe '#should_process?' do
     let(:conversation) do
-      double(open?: true, pending?: false, assignee_id: 'human-user-id')
+      double(open?: true, pending?: false, assignee_id: 'human-user-id', custom_attributes: {})
     end
     let(:inbox) { double(present?: true) }
     let(:agent_bot) do
@@ -45,6 +45,46 @@ RSpec.describe AgentBots::InactivityActionsService do
 
     it 'skips conversations assigned to a human' do
       expect(service.send(:should_process?)).to be(false)
+    end
+
+    it 'keeps the configured cadence available for a marked webhook conversation' do
+      allow(conversation).to receive(:assignee_id).and_return(nil)
+      allow(conversation).to receive(:custom_attributes).and_return({ 'urgent_followup' => true })
+
+      expect(service.send(:should_process?)).to be(true)
+    end
+  end
+
+  describe '#reserve_execution' do
+    let(:channel) { Channel::Api.create! }
+    let(:inbox) { Inbox.create!(name: 'Cadence test inbox', channel: channel) }
+    let(:contact) { Contact.create!(name: 'Cadence customer', email: "cadence-#{SecureRandom.hex(4)}@example.com") }
+    let(:contact_inbox) { ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8)) }
+    let(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox) }
+    let(:bot) { AgentBot.create!(name: 'Cadence bot', outgoing_url: 'https://example.test/bot') }
+    let(:incoming) { instance_double(Message, id: SecureRandom.uuid) }
+    let(:action) { { 'action' => 'interact', 'minutes' => 10 } }
+    let(:cadence) { described_class.new(conversation, bot) }
+
+    before { allow(cadence).to receive(:current_for_followup_cycle?).with(incoming).and_return(true) }
+
+    it 'defers urgent automation while a normal step is pending' do
+      normal = cadence.send(:reserve_execution, action, 0, 'interact', incoming)
+      cadence.instance_variable_set(:@urgent_followup, true)
+
+      expect(cadence.send(:reserve_execution, action, -2, 'interact', incoming)).to be_nil
+      expect(normal.execution_status).to eq('pending')
+    end
+
+    it 'defers normal automation while urgent owns the cycle, then resumes after failure' do
+      cadence.instance_variable_set(:@urgent_followup, true)
+      urgent = cadence.send(:reserve_execution, action, -2, 'interact', incoming)
+      cadence.instance_variable_set(:@urgent_followup, false)
+
+      expect(cadence.send(:reserve_execution, action, 0, 'interact', incoming)).to be_nil
+
+      urgent.update!(execution_status: 'failed')
+      expect(cadence.send(:reserve_execution, action, 0, 'interact', incoming)).to be_present
     end
   end
 

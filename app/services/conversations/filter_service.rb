@@ -54,6 +54,13 @@ class Conversations::FilterService < FilterService
     }
   end
 
+  def default_filter(query_hash, filter_operator_value)
+    return super unless query_hash[:attribute_key] == 'urgent_followup'
+
+    "COALESCE(conversations.custom_attributes ->> 'urgent_followup', 'false') " \
+      "#{filter_operator_value} #{query_hash[:query_operator]}"
+  end
+
   def conversations
     # Honra sort_by igual ao index (ConversationFinder), em vez de hard-codar
     # last_activity_at DESC — elimina a divergência index vs filtro. Default

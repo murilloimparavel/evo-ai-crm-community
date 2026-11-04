@@ -7,8 +7,11 @@ class AgentBots::MessageCreator
   # is present the reply may have a blank content (media-only message).
   # message_template_id: optional MessageTemplate to render (EVO-1235); when it
   # resolves, its rendered content replaces the provided inline content.
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil, media: nil,
                        message_template_id: nil, processed_params: {})
+    return if content_attributes&.dig(:urgent_followup) && !urgent_followup_allowed?(conversation)
+
     if message_template_id.present?
       rendered = render_template_reply(message_template_id, conversation, processed_params)
       content = rendered if rendered.present?
@@ -22,14 +25,32 @@ class AgentBots::MessageCreator
       Rails.logger.info "[AgentBot HTTP] Force creating bot reply (skipping eligibility check) in conversation #{conversation.id}"
     else
       # conversation_eligible_for_bot_reply? already logs which rule rejected.
-      return unless conversation_eligible_for_bot_reply?(conversation)
+      return unless conversation_eligible_for_bot_reply?(conversation, urgent_followup: content_attributes&.dig(:urgent_followup))
     end
 
     Rails.logger.info "[AgentBot HTTP] Creating bot reply in conversation #{conversation.id} (#{media.size} media)"
     create_message_with_fallback(content, conversation, content_type: content_type, content_attributes: content_attributes, media: media)
   end
 
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
   private
+
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def urgent_followup_allowed?(conversation)
+    conversation.reload
+    return false unless conversation.open? || conversation.pending?
+    return false if conversation.custom_attributes&.dig('archived').to_s == 'true'
+
+    source = conversation.messages.incoming.order(created_at: :desc).first
+    return false unless source && source.created_at > 24.hours.ago
+    return false unless conversation.custom_attributes&.dig('urgent_followup_message_id') == source.id
+
+    !conversation.messages.where(message_type: %i[outgoing template], private: false)
+                 .exists?(['created_at >= ?', source.created_at])
+  end
+
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # Resolves the template (global-aware) and renders it; returns nil on a miss or
   # a missing required variable so the caller keeps the provided inline content.
@@ -46,12 +67,14 @@ class AgentBots::MessageCreator
     nil
   end
 
-  def conversation_eligible_for_bot_reply?(conversation)
+  def conversation_eligible_for_bot_reply?(conversation, urgent_followup: false)
     # Find the AgentBotInbox configuration for this conversation's inbox
     agent_bot_inbox = AgentBotInbox.find_by(agent_bot: @agent_bot, inbox: conversation.inbox)
 
     unless agent_bot_inbox
       Rails.logger.warn "[AgentBot HTTP] No AgentBotInbox found for agent_bot #{@agent_bot.id} and inbox #{conversation.inbox.id}"
+      return false if urgent_followup
+
       # Fallback to legacy behavior: only pending conversations
       is_pending = conversation.status == 'pending'
       Rails.logger.debug { "[AgentBot HTTP] Conversation status check (legacy): #{conversation.status} -> eligible: #{is_pending}" }
@@ -60,7 +83,11 @@ class AgentBots::MessageCreator
 
     # CRM-212: same gate as AgentBotListener, and the reply is discarded here
     # AFTER the LLM already ran — so the log has to name the rule that rejected.
-    skip_reason = agent_bot_inbox.processing_block_reason(conversation)
+    skip_reason = if urgent_followup
+                    agent_bot_inbox.urgent_followup_block_reason(conversation)
+                  else
+                    agent_bot_inbox.processing_block_reason(conversation)
+                  end
     return true if skip_reason.nil?
 
     Rails.logger.warn "[AgentBot HTTP] ❌ reply discarded - conv #{conversation.id}: #{skip_reason}"

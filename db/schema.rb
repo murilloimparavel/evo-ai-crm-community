@@ -479,6 +479,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_03_130000) do
     t.index ["status", "priority"], name: "index_conversations_on_status_and_priority"
     t.index ["status"], name: "index_conversations_on_status"
     t.index ["team_id"], name: "index_conversations_on_team_id"
+    t.index ["id"], name: "index_conversations_urgent_followup", where: "((custom_attributes ->> 'urgent_followup'::text) = 'true'::text)"
     t.index ["uuid"], name: "index_conversations_on_uuid", unique: true
     t.index ["waiting_since"], name: "index_conversations_on_waiting_since"
   end

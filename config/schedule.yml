@@ -34,6 +34,12 @@ trigger_imap_email_inboxes_job:
   queue: scheduled_jobs
 
 # executed At every minute to check for inactive conversations and trigger actions
+urgent_unanswered_conversations_job:
+  cron: '* * * * *'
+  class: 'Conversations::UrgentUnansweredJob'
+  queue: scheduled_jobs
+  description: 'Route unanswered conversations to urgent follow-up after two minutes'
+
 agent_bots_inactivity_check_scheduler_job:
   cron: '* * * * *'
   class: 'AgentBots::InactivityCheckSchedulerJob'

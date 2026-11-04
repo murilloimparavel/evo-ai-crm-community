@@ -8,6 +8,22 @@ class Api::V1::NotificationSubscriptionsController < Api::BaseController
     render json: subscription
   end
 
+  def test
+    return head :unauthorized unless current_user
+
+    subscription = current_user.notification_subscriptions.browser_push.find_by!(identifier: params.require(:endpoint))
+    unless Notification::TestPushNotificationJob.supported_endpoint?(subscription.identifier)
+      return render json: { error: 'Este serviço de push não é compatível com o teste.' }, status: :unprocessable_entity
+    end
+
+    unless Rails.cache.write("web-push-test:#{current_user.id}", true, expires_in: 30.seconds, unless_exist: true)
+      return render json: { error: 'Aguarde 30 segundos antes de enviar outro teste.' }, status: :too_many_requests
+    end
+
+    Notification::TestPushNotificationJob.set(wait: 10.seconds).perform_later(subscription.id, current_user.id)
+    render json: { delay_seconds: 10 }, status: :accepted
+  end
+
   def destroy
     subscriptions = current_user.notification_subscriptions
     if params[:endpoint].present?

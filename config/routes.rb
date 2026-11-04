@@ -709,7 +709,9 @@ Rails.application.routes.draw do
         end
       end
 
-      resource :notification_subscriptions, only: [:show, :create, :destroy]
+      resource :notification_subscriptions, only: [:show, :create, :destroy] do
+        post :test
+      end
 
       resources :user_tours, only: [:index, :create, :destroy], param: :tour_key
 

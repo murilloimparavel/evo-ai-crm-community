@@ -1,6 +1,6 @@
 # Preserve the verified production runtime/dependencies. The source checkout must
 # contain production 135c333 plus the reviewed additive classification changes.
-FROM ghcr.io/murilloimparavel/crcn-knowledge-crm@sha256:a54bfd5cae7bc99076a99031924a728b0b3a30aa477195ac3959f27f47e998e8
+FROM ghcr.io/murilloimparavel/crcn-knowledge-crm@sha256:ebb06a392446804e069ca4b2bb9e58b1d3784c653319ef29375a42d1fc1125d4
 
 # Copy the complete application namespaces so new models, services, jobs, routes,
 # cron definitions and migrations cannot be omitted by an outdated file list.

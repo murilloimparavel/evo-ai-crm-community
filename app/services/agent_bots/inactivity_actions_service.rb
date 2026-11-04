@@ -20,7 +20,8 @@ class AgentBots::InactivityActionsService
 
     Rails.logger.info "[InactivityActions] Time inactive: #{time_inactive_minutes} minutes (since last incoming message at #{last_incoming&.created_at})"
 
-    pending_execution = InactivityActionExecution.for_conversation(@conversation.id).pending.order(:created_at).first
+    pending_execution = InactivityActionExecution.for_conversation(@conversation.id)
+                                                 .where.not(action_index: -2).pending.order(:created_at).first
     if pending_execution
       pending_result = process_pending_execution(pending_execution, last_incoming)
       return unless pending_result == :continue
@@ -72,9 +73,6 @@ class AgentBots::InactivityActionsService
       Rails.logger.debug "[InactivityActions] Skipping - conversation not open/pending (status: #{@conversation.status})"
       return false
     end
-
-    # The urgent two-minute follow-up owns this unanswered cycle.
-    return false if @conversation.custom_attributes&.dig('urgent_followup') == true
 
     unless @inbox.present?
       Rails.logger.debug "[InactivityActions] Skipping - no inbox"
@@ -456,18 +454,33 @@ class AgentBots::InactivityActionsService
   end
 
   def reserve_execution(action_config, action_index, action_type, last_incoming)
-    InactivityActionExecution.create!(
-      conversation_id: @conversation.id,
-      agent_bot_id: @agent_bot.id,
-      action_index: action_index,
-      action_type: action_type,
-      action_config: action_config,
-      message_sent: nil,
-      execution_status: 'pending',
-      attempt_count: 1,
-      source_incoming_message_id: last_incoming&.id,
-      executed_at: Time.current
-    )
+    # Both schedulers reserve under the same conversation lock. A normal
+    # reservation wins if it already exists; otherwise the urgent reservation
+    # owns this customer-message cycle until it sends or fails.
+    @conversation.with_lock do
+      next unless current_for_followup_cycle?(last_incoming)
+
+      executions = InactivityActionExecution.for_conversation(@conversation.id)
+                                           .where(source_incoming_message_id: last_incoming.id)
+      if action_index == -2
+        next if executions.pending.where.not(action_index: -2).exists?
+      else
+        next if executions.where(action_index: -2, execution_status: %w[pending sent]).exists?
+      end
+
+      InactivityActionExecution.create!(
+        conversation_id: @conversation.id,
+        agent_bot_id: @agent_bot.id,
+        action_index: action_index,
+        action_type: action_type,
+        action_config: action_config,
+        message_sent: nil,
+        execution_status: 'pending',
+        attempt_count: 1,
+        source_incoming_message_id: last_incoming.id,
+        executed_at: Time.current
+      )
+    end
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
     nil
   end

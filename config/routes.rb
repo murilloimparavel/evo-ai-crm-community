@@ -628,6 +628,11 @@ Rails.application.routes.draw do
           post :preview
           post :publish
           get :projection
+          get :results
+          post :backfill
+          get 'runtime', action: :runtime_settings
+          patch 'runtime', action: :update_runtime_settings
+          post 'runtime/reset_provider', action: :reset_provider
         end
         collection do
           get :stats

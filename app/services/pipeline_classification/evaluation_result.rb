@@ -21,21 +21,26 @@ module PipelineClassification
       end
       fields[:decision].merge!(audit)
       if response[:ok] == true && response[:model] == @row.model
-        answer = response.dig(:answers, 'stage_candidate')
         compiled = Catalog.from_revision(@row.pipeline_classification_catalog).compiled
-        if answer.is_a?(Hash) && answer['type'] == 'choice' && compiled['questions']['stage_candidate']['criteria'].key?(answer['choice']) &&
-           Followups::QuestionValidator.probability?(answer['confidence'])
-          choice = answer['choice']
-          confidence = answer['confidence']
-          fields[:decision].merge!('choice' => choice, 'confidence' => confidence, 'financial_proof' => false)
-          threshold = @row.pipeline_classification_catalog.snapshot.dig('classification', 'thresholds', 'stage_candidate')
-          if choice == 'unclear' || confidence < threshold
-            fields[:reason] = 'uncertain_answer'
-          elsif choice == 'no_candidate'
+        pipeline = response.dig(:answers, 'pipeline_candidate')
+        stage = response.dig(:answers, 'stage_candidate')
+        if typed_choice?(pipeline, compiled.dig('questions', 'pipeline_candidate')) &&
+           typed_choice?(stage, compiled.dig('questions', 'stage_candidate'))
+          pipeline_choice = pipeline.fetch('choice')
+          stage_choice = stage.fetch('choice')
+          pipeline_confidence = pipeline.fetch('confidence')
+          stage_confidence = stage.fetch('confidence')
+          thresholds = @row.pipeline_classification_catalog.snapshot.dig('classification', 'thresholds')
+          fields[:decision].merge!('pipeline_choice' => pipeline_choice, 'pipeline_confidence' => pipeline_confidence,
+                                   'choice' => stage_choice, 'confidence' => stage_confidence, 'financial_proof' => false)
+          if pipeline_choice == 'no_candidate' || stage_choice == 'no_candidate'
             fields[:status] = 'classified'
             fields[:reason] = 'no_candidate'
+          elsif pipeline_choice == 'unclear' || stage_choice == 'unclear' ||
+                pipeline_confidence < thresholds.fetch('pipeline_candidate') || stage_confidence < thresholds.fetch('stage_candidate')
+            fields[:reason] = 'uncertain_answer'
           else
-            fields.merge!(status: 'classified', reason: 'stage_recommended', recommended_stage_id: compiled.fetch('aliases').fetch(choice))
+            recommend!(fields, compiled, pipeline_choice, stage_choice)
           end
         end
       else
@@ -49,6 +54,22 @@ module PipelineClassification
         end
       end
       fields
+    end
+
+    def typed_choice?(answer, question)
+      answer.is_a?(Hash) && question.is_a?(Hash) && answer['type'] == 'choice' &&
+        question.fetch('criteria').key?(answer['choice']) && QuestionValidator.probability?(answer['confidence'])
+    end
+
+    def recommend!(fields, compiled, pipeline_choice, stage_choice)
+      pipeline_id = compiled.fetch('pipeline_aliases')[pipeline_choice]
+      stage_target = compiled.fetch('aliases')[stage_choice]
+      return fields[:reason] = 'invalid_provider_schema' if pipeline_id.nil? || stage_target.nil?
+      return fields[:reason] = 'pipeline_stage_mismatch' if stage_target.fetch('pipeline_id') != pipeline_id
+
+      stage_id = stage_target.fetch('stage_id')
+      fields[:decision].merge!('recommended_pipeline_id' => pipeline_id, 'recommended_stage_id' => stage_id)
+      fields.merge!(status: 'classified', reason: 'stage_recommended', recommended_stage_id: stage_id)
     end
 
     def invoke_provider(client, snapshot, compiled)

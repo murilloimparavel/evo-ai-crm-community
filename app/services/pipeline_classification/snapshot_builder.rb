@@ -1,7 +1,8 @@
 module PipelineClassification
   # Reuses the mature public-message minimizer with a standalone domain adapter;
   # no FollowupCampaign, template or commercial anchor is constructed or persisted.
-  class SnapshotBuilder < Followups::SnapshotBuilder
+  class SnapshotBuilder < SnapshotBase
+    MAX_MESSAGES = 20
     MAX_MESSAGE_CHARACTERS = 2000
     # Standalone adapter intentionally initializes no campaign/template state from the parent.
     def initialize(result:, catalog:, conversation:, now: Time.current) # rubocop:disable Lint/MissingSuper
@@ -13,14 +14,15 @@ module PipelineClassification
     end
 
     def serialize(message, index)
-      super.merge('delivery' => message.incoming? ? 'customer_received' : 'business_accepted')
+      super.merge('delivery' => message.incoming? ? 'customer_received' : 'business_accepted',
+                  'created_at' => message.created_at&.utc&.iso8601)
     end
     private :serialize
 
     def public_messages
       base = super
       incoming = base.where(message_type: :incoming)
-      outgoing = base.where(message_type: :outgoing, status: %w[sent delivered read]).where.not(source_id: [nil, ''])
+      outgoing = base.where(message_type: :outgoing, status: %w[sent delivered read])
       incoming.or(outgoing)
     end
 
@@ -59,7 +61,7 @@ module PipelineClassification
       raise Unsafe, 'missing_mandatory_message' unless messages.any? { |message| message.id == source.id }
 
       profile = @catalog.snapshot.fetch('classification')
-      crm = Followups::SnapshotContext.new(profile.fetch('context_sources')).call(conversation: @conversation)
+      crm = SnapshotContext.new(profile.fetch('context_sources')).call(conversation: @conversation)
       selected_keys = profile.fetch('context_sources').fetch('fields', []).map { |field| field.fetch('key') }
       raise Unsafe, 'missing_selected_context' unless (selected_keys - crm.keys).empty?
 
@@ -70,7 +72,6 @@ module PipelineClassification
                      'messages' => messages.map.with_index { |message, index| serialize(message, index) } }
       compiled = Catalog.from_revision(@catalog).compiled
       item = @conversation.pipeline_items.find_by(pipeline_id: @catalog.pipeline_id, completed_at: nil)
-      state_data['current_stage'] = compiled.fetch('aliases').key(item&.pipeline_stage_id) || 'not_participating'
       raise Unsafe, 'snapshot_too_large' if JSON.generate(model: profile.fetch('model'), state: state_data,
                                                           questions: compiled.fetch('questions')).bytesize > MAX_BYTES
 
@@ -82,7 +83,7 @@ module PipelineClassification
       { state: state_data, references: references, snapshot_hash: Catalog.digest({ 'state' => state_data,
                                                                                    'references' => references.deep_stringify_keys }),
         valid_until: [@record.expires_at, @record.created_at + profile.fetch('snapshot_ttl_seconds').seconds].min }
-    rescue Unsafe, Followups::SnapshotContext::Invalid, Followups::SnapshotContext::InvalidValue => e
+    rescue Unsafe, SnapshotContext::Invalid, SnapshotContext::InvalidValue => e
       { state: nil, references: {}, valid_until: @now, reason: e.message }
     end
   end

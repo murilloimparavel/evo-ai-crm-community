@@ -14,6 +14,11 @@ module PipelineClassification
                                   .where('lease_expires_at IS NULL OR lease_expires_at <= ?', now).limit(100).find_each do |result|
         EvaluateJob.perform_later(result.id)
       end
+      PipelineClassificationResult.joins(:pipeline, :conversation, :pipeline_classification_catalog)
+                                  .where(status: 'classified', reason: 'stage_recommended')
+                                  .where("NOT (decision ? 'application')").limit(100).find_each do |result|
+        ApplyDecisionJob.perform_later(result.id)
+      end
     end
   end
 end

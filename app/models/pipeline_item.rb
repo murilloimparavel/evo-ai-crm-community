@@ -43,7 +43,6 @@ class PipelineItem < ApplicationRecord # rubocop:disable Metrics/ClassLength
   after_update :publish_pipeline_item_completed, if: :saved_change_to_completed_at?
   after_destroy :cancel_followup_stage_work
   after_create_commit -> { PipelineClassification::ModelHooks.pipeline_item_changed(self) }
-  after_update_commit -> { PipelineClassification::ModelHooks.pipeline_item_changed(self) }
   after_destroy_commit -> { PipelineClassification::ModelHooks.pipeline_item_changed(self) }
 
   def invalidate_followup_stage_work
@@ -75,6 +74,8 @@ class PipelineItem < ApplicationRecord # rubocop:disable Metrics/ClassLength
   has_many :products, through: :pipeline_item_products
   has_many :product_variants, through: :pipeline_item_products
 
+  attr_reader :pipeline_classification_move
+
   # Preserve the existing validation error text returned to clients.
   validates :conversation_id, uniqueness: { scope: :pipeline_id, conditions: -> { where(completed_at: nil) },
                                             message: 'already has an active journey in this pipeline' }, allow_nil: true # rubocop:disable Rails/I18nLocaleTexts
@@ -97,6 +98,10 @@ class PipelineItem < ApplicationRecord # rubocop:disable Metrics/ClassLength
   after_create_commit :broadcast_stage_update_to_evo_flow
   # Existing production callback overlap is retained; changing legacy event delivery needs a separate regression review.
   after_update_commit :broadcast_stage_update_to_evo_flow, if: :saved_change_to_pipeline_stage_id? # rubocop:disable Rails/AfterCommitOverride
+  after_update_commit do
+    PipelineClassification::ModelHooks.pipeline_item_changed(self)
+    clear_pipeline_classification_move!
+  end
   after_destroy :publish_pipeline_item_deleted
 
   scope :in_stage, ->(stage) { where(pipeline_stage: stage) }
@@ -113,6 +118,29 @@ class PipelineItem < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
     # The movement will be created automatically by the after_update callback
     true
+  end
+
+  # Used only by the classifier after revalidating a published catalog.
+  # Preserve the normal callbacks while marking the audit movement automated.
+  def move_by_pipeline_classification!(new_stage, result_id:)
+    target_pipeline = new_stage&.pipeline
+    return false unless target_pipeline&.is_active
+    return false if new_stage.pipeline_id != pipeline_id &&
+                    self.class.active.exists?(conversation_id: conversation_id, pipeline_id: new_stage.pipeline_id)
+
+    old_stage = pipeline_stage
+    cross_pipeline = new_stage.pipeline_id != pipeline_id
+    @pipeline_classification_move = { result_id: result_id, cross_pipeline: cross_pipeline }
+    update!(pipeline: new_stage.pipeline, pipeline_stage: new_stage)
+    if cross_pipeline
+      stage_movements.create!(from_stage: old_stage, to_stage: new_stage, moved_by: nil, movement_type: 'cross_pipeline',
+                              notes: "Automatic pipeline classification result=#{result_id}")
+    end
+    true
+  end
+
+  def clear_pipeline_classification_move!
+    @pipeline_classification_move = nil
   end
 
   def days_in_pipeline
@@ -363,14 +391,7 @@ class PipelineItem < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # `stages_belong_to_same_pipeline` and roll the update back.
     cross_pipeline_change = old_stage && old_stage.pipeline_id != pipeline_stage.pipeline_id
 
-    unless cross_pipeline_change
-      stage_movements.create!(
-        from_stage: old_stage,
-        to_stage: pipeline_stage,
-        moved_by: Current.user,
-        movement_type: 'manual'
-      )
-    end
+    record_stage_movement(old_stage) unless cross_pipeline_change
 
     # Stage changed → the "stuck in stage" clock restarts, so wipe any
     # stage_stagnation inactivity executions for this item (reply executions are
@@ -384,6 +405,13 @@ class PipelineItem < ApplicationRecord # rubocop:disable Metrics/ClassLength
       pipeline_item: self,
       changed_attributes: { 'pipeline_stage_id' => [old_stage_id, pipeline_stage_id] }
     )
+  end
+
+  def record_stage_movement(old_stage)
+    movement_options = pipeline_classification_move
+    stage_movements.create!(from_stage: old_stage, to_stage: pipeline_stage, moved_by: Current.user,
+                            movement_type: movement_options ? 'automated' : 'manual',
+                            notes: movement_options && "Automatic pipeline classification result=#{movement_options.fetch(:result_id)}")
   end
 
   def dispatch_initial_stage_event

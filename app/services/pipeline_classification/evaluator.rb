@@ -68,8 +68,8 @@ module PipelineClassification
       # Failure codes share the installation breaker. No body or customer text is
       # retained; a credential error requires the same human reset as follow-up.
       if response.is_a?(Hash)
-        Followups::CircuitBreaker.new.record(result: response.merge(classification: response[:answers]), model: Catalog::MODEL,
-                                             questions: compiled.fetch('questions'), now: now)
+        CircuitBreaker.new.record(result: response.merge(classification: response[:answers]), model: Catalog::MODEL,
+                                  questions: compiled.fetch('questions'), now: now)
       end
       finalize!(claim, snapshot, response)
     rescue Budget::Exceeded => e
@@ -77,7 +77,7 @@ module PipelineClassification
     rescue StandardError
       if claim && @provider_started
         begin
-          Followups::CircuitBreaker.new.record(result: { reason: 'classification_transport_error' }, now: now)
+          CircuitBreaker.new.record(result: { reason: 'classification_transport_error' }, now: now)
         rescue StandardError
           nil
         end

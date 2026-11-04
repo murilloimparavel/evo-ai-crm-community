@@ -11,7 +11,11 @@ RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
     travel_to Time.utc(2026, 11, 2, 15)
     allow(SendReplyJob).to receive(:perform_later)
     InstallationConfig.create!(name: 'FOLLOWUP_SETTINGS', value: { 'budget_timezone' => 'UTC', 'daily_usd' => 1.0, 'daily_conversations' => 20 })
-    InstallationConfig.create!(name: 'PIPELINE_CLASSIFICATION_SETTINGS', value: { 'max_attempt_cost_usd' => 0.01 })
+    InstallationConfig.create!(name: 'PIPELINE_CLASSIFICATION_SETTINGS', value: {
+                                 'online_enabled' => true, 'privacy_reviewed' => true, 'language_validated' => true,
+                                 'billing_ceiling_verified' => true, 'max_attempt_cost_usd' => 0.01,
+                                 'daily_usd' => 1.0, 'daily_conversations' => 20, 'budget_timezone' => 'UTC'
+                               })
   end
 
   # Keep the complete multi-record integration scenario and its atomic safety assertions together.
@@ -33,8 +37,11 @@ RSpec.describe 'Follow-up consuming the canonical pipeline classification' do
     row = PipelineClassification::DebouncedClassifier.new(state: state, generation: state.generation).call
     if classify
       response = { ok: true, model: PipelineClassification::Catalog::MODEL,
-                   answers: { 'stage_candidate' => { 'type' => 'choice', 'choice' => 'stage_1', 'confidence' => 1.0,
-                                                     'probabilities' => { 'stage_1' => 1.0, 'unclear' => 0.0, 'no_candidate' => 0.0 } } },
+                   answers: {
+                     'pipeline_candidate' => { 'type' => 'choice', 'choice' => 'pipeline_1', 'confidence' => 1.0 },
+                     'stage_candidate' => { 'type' => 'choice', 'choice' => 'stage_1', 'confidence' => 1.0,
+                                            'probabilities' => { 'stage_1' => 1.0, 'unclear' => 0.0, 'no_candidate' => 0.0 } }
+                   },
                    input_tokens: 100, usage_known: true, cost_known: true, cost_usd: 0.0000042 }
       client = instance_double(Ai::JevClient, call: response)
       PipelineClassification::Evaluator.new(result: row, client: client, budget: PipelineClassification::Budget.new(offline: true)).call

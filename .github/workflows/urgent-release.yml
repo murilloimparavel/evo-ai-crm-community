@@ -152,6 +152,14 @@ jobs:
           ruby-version: '3.4.4'
           bundler-cache: true
 
+      - name: Run multi-message urgent regressions first
+        run: |
+          set -euo pipefail
+          bundle exec rails db:create
+          bundle exec rails db:schema:load
+          bundle exec rspec spec/services/conversations/urgent_unanswered_service_ordering_spec.rb \
+            --format progress --format RspecJunitFormatter --out "$RUNNER_TEMP/rspec-urgent-order-targeted.xml"
+
       - name: Run full RSpec suite against base and PR head
         run: |
           set -euo pipefail

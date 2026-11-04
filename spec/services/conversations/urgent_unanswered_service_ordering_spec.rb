@@ -26,18 +26,19 @@ RSpec.describe Conversations::UrgentUnansweredService do
   end
 
   before do
+    allow(AgentBots::HttpRequestService).to receive(:new).and_return(http_client)
+    bot_inbox
     older_incoming
     older_reply
     latest_incoming
-    bot_inbox
-    allow(AgentBots::HttpRequestService).to receive(:new).and_return(http_client)
   end
 
   def insert_message(type, at, content, id: SecureRandom.uuid)
+    attributes = { id: id, inbox_id: inbox.id, conversation_id: conversation.id, private: false,
+                   message_type: Message.message_types.fetch(type), content: content, created_at: at, updated_at: at }
     # Historical fixtures must not dispatch customer-facing callbacks.
     # rubocop:disable Rails/SkipsModelValidations
-    Message.insert!(id: id, inbox_id: inbox.id, conversation_id: conversation.id, private: false,
-                    message_type: Message.message_types.fetch(type), content: content, created_at: at, updated_at: at)
+    Message.insert!(attributes)
     # rubocop:enable Rails/SkipsModelValidations
     Message.find(id)
   end

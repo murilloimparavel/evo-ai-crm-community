@@ -35,7 +35,7 @@ class AgentBots::InactivityActionsService
   # The urgent queue uses its own reserved step, leaving the configured
   # inactivity cadence untouched. A repeated scheduler pass reconciles a
   # pending execution rather than sending a second message.
-  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+  # rubocop:disable Metrics/MethodLength
   def process_urgent_followup(source_message)
     return unless @agent_bot.evo_ai_provider?
 
@@ -59,7 +59,7 @@ class AgentBots::InactivityActionsService
     end
   end
 
-  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+  # rubocop:enable Metrics/MethodLength
 
   private
 
@@ -340,7 +340,6 @@ class AgentBots::InactivityActionsService
 
   # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength, Metrics/AbcSize
 
-  # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
   def build_inactivity_payload(suggested_message, action_config, last_incoming, execution)
     minutes_inactive = [(execution.created_at - last_incoming.created_at) / 60.0, 0].max.floor
     conversation_context = recent_customer_facing_context
@@ -380,8 +379,6 @@ class AgentBots::InactivityActionsService
     }
   end
 
-  # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
-
   def urgent_followup_prompt(suggested_message, conversation_context)
     [
       '<system_message>[SYSTEM - URGENT UNANSWERED CONVERSATION] ',
@@ -396,6 +393,7 @@ class AgentBots::InactivityActionsService
     ].join
   end
 
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def recent_customer_facing_context
     context_limit = @urgent_followup ? 25 : 15
     @conversation.messages.where(private: false).order(created_at: :desc).limit(context_limit).reverse.filter_map do |message|
@@ -412,6 +410,8 @@ class AgentBots::InactivityActionsService
       "#{speaker}: #{message.content.to_s.truncate(800)}"
     end.join("\n")
   end
+
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   def execute_finalize_action(action_config, action_index, execution, last_incoming)
     Rails.logger.info "[InactivityActions] Executing finalize action - resolving conversation"

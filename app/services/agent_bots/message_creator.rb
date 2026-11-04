@@ -36,6 +36,7 @@ class AgentBots::MessageCreator
 
   private
 
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def urgent_followup_allowed?(conversation)
     conversation.reload
     return false unless conversation.open? || conversation.pending?
@@ -48,6 +49,8 @@ class AgentBots::MessageCreator
     !conversation.messages.where(message_type: %i[outgoing template], private: false)
                  .exists?(['created_at >= ?', source.created_at])
   end
+
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # Resolves the template (global-aware) and renders it; returns nil on a miss or
   # a missing required variable so the caller keeps the provided inline content.
@@ -64,7 +67,6 @@ class AgentBots::MessageCreator
     nil
   end
 
-  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def conversation_eligible_for_bot_reply?(conversation, urgent_followup: false)
     # Find the AgentBotInbox configuration for this conversation's inbox
     agent_bot_inbox = AgentBotInbox.find_by(agent_bot: @agent_bot, inbox: conversation.inbox)
@@ -91,8 +93,6 @@ class AgentBots::MessageCreator
     Rails.logger.warn "[AgentBot HTTP] ❌ reply discarded - conv #{conversation.id}: #{skip_reason}"
     false
   end
-
-  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   def create_message_with_fallback(content, conversation, content_type:, content_attributes:, media: [])
     create_direct_message(content, conversation, content_type: content_type, content_attributes: content_attributes, media: media)

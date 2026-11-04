@@ -18,7 +18,7 @@ class Conversations::UrgentUnansweredService
   def update_queue
     @conversation.with_lock do
       source_message = @conversation.messages.incoming.where(private: false)
-                                    .order(created_at: :desc, id: :desc).first
+                                    .reorder(created_at: :desc, id: :desc).first
       if eligible?(source_message)
         mark_urgent(source_message)
         source_message

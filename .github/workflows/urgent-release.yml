@@ -40,7 +40,7 @@ jobs:
       - name: Run RuboCop
         env:
           EVENT_NAME: pull_request
-          BASE_SHA: ff2a1ccd957008f4c21de550b7c4f99c50f59a1e
+          BASE_SHA: 310ec304174dd916eea99b996e8721bea34abe4a
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -82,7 +82,7 @@ jobs:
       - name: Run Brakeman
         env:
           EVENT_NAME: pull_request
-          BASE_SHA: ff2a1ccd957008f4c21de550b7c4f99c50f59a1e
+          BASE_SHA: 310ec304174dd916eea99b996e8721bea34abe4a
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/brakeman"
@@ -115,7 +115,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      BASE_SHA: ff2a1ccd957008f4c21de550b7c4f99c50f59a1e
+      BASE_SHA: 310ec304174dd916eea99b996e8721bea34abe4a
       HEAD_SHA: ${{ github.sha }}
     services:
       postgres:

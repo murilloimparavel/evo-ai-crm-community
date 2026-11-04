@@ -15,7 +15,7 @@ class AgentBots::InactivityActionsService
     return if inactivity_actions.empty?
 
     time_inactive_minutes = calculate_inactive_time_minutes
-    last_incoming = @conversation.messages.incoming.order(created_at: :desc).first
+    last_incoming = @conversation.messages.incoming.reorder(created_at: :desc, id: :desc).first
     return unless last_incoming
     return unless cycle_started_after_activation?(last_incoming)
 
@@ -134,7 +134,7 @@ class AgentBots::InactivityActionsService
   def calculate_inactive_time_minutes
     # Calcula inatividade baseado na última mensagem INCOMING (do cliente)
     # Ignora mensagens do bot para evitar resetar o timer de inatividade
-    last_incoming_message = @conversation.messages.incoming.order(created_at: :desc).first
+    last_incoming_message = @conversation.messages.incoming.reorder(created_at: :desc, id: :desc).first
     last_activity = last_incoming_message&.created_at || @conversation.created_at
 
     time_diff_seconds = Time.current - last_activity
@@ -306,7 +306,7 @@ class AgentBots::InactivityActionsService
   # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength, Metrics/AbcSize
   def current_for_followup_cycle?(source_incoming)
     conversation = @conversation.reload
-    latest_incoming = conversation.messages.incoming.order(created_at: :desc).first
+    latest_incoming = conversation.messages.incoming.reorder(created_at: :desc, id: :desc).first
     return false unless latest_incoming && source_incoming&.id == latest_incoming.id
     return false if conversation.assignee_id.present? && !@urgent_followup
     return false unless conversation.open? || conversation.pending?
@@ -397,7 +397,7 @@ class AgentBots::InactivityActionsService
   # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
   def recent_customer_facing_context
     context_limit = @urgent_followup ? 25 : 15
-    @conversation.messages.where(private: false).order(created_at: :desc).limit(context_limit).reverse.filter_map do |message|
+    @conversation.messages.where(private: false).reorder(created_at: :desc, id: :desc).limit(context_limit).reverse.filter_map do |message|
       next unless message.incoming? || message.outgoing?
       next if message.content.blank?
 

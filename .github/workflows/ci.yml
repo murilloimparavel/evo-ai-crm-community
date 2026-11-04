@@ -56,10 +56,11 @@ jobs:
             baseline_dir="$RUNNER_TEMP/rubocop-base-$GITHUB_RUN_ID"
             git worktree add --detach "$baseline_dir" "$BASE_SHA"
             mapfile -t base_files < <(printf '%s\n' "${ruby_files[@]}" | while read -r file; do
-              test -f "$baseline_dir/$file" && printf '%s\n' "$file"
+              test -f "$baseline_dir/$file" && printf '%s\n' "$baseline_dir/$file"
             done)
             if ((${#base_files[@]} > 0)); then
-              (cd "$baseline_dir" && bundle exec rubocop --format json --out "$RUNNER_TEMP/rubocop-base.json" "${base_files[@]}") || true
+              bundle exec rubocop --config "$baseline_dir/.rubocop.yml" --format json \
+                --out "$RUNNER_TEMP/rubocop-base.json" "${base_files[@]}" || true
             else
               printf '{"files":[]}' > "$RUNNER_TEMP/rubocop-base.json"
             fi

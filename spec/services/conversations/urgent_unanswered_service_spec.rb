@@ -8,7 +8,9 @@ RSpec.describe Conversations::UrgentUnansweredService do
   let(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox) }
 
   def insert_message(type, at)
-    Message.insert!(
+    # Insert historical timestamps without dispatching customer-facing callbacks.
+    # rubocop:disable Rails/SkipsModelValidations
+    Message.insert!({
       id: SecureRandom.uuid,
       inbox_id: inbox.id,
       conversation_id: conversation.id,
@@ -16,7 +18,8 @@ RSpec.describe Conversations::UrgentUnansweredService do
       content: 'Message',
       created_at: at,
       updated_at: at
-    )
+    })
+    # rubocop:enable Rails/SkipsModelValidations
   end
 
   it 'marks a two-minute-old unanswered conversation urgent' do
@@ -68,8 +71,8 @@ RSpec.describe Conversations::UrgentUnansweredService do
   it 'keeps a recent unanswered conversation in the queue without contacting the bot after 24 hours' do
     at = 25.hours.ago
     insert_message('incoming', at)
-    bot = double(evo_ai_provider?: true)
-    bot_inbox = double(active?: true, agent_bot: bot)
+    bot = instance_double(AgentBot, evo_ai_provider?: true)
+    bot_inbox = instance_double(AgentBotInbox, active?: true, agent_bot: bot)
     allow(inbox).to receive(:agent_bot_inbox).and_return(bot_inbox)
     allow(conversation).to receive(:inbox).and_return(inbox)
     expect(AgentBots::InactivityActionsService).not_to receive(:new)

@@ -30,7 +30,7 @@ RSpec.describe AgentBots::InactivityActionsService do
 
   describe '#should_process?' do
     let(:conversation) do
-      double(open?: true, pending?: false, assignee_id: 'human-user-id')
+      double(open?: true, pending?: false, assignee_id: 'human-user-id', custom_attributes: {})
     end
     let(:inbox) { double(present?: true) }
     let(:agent_bot) do

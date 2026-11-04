@@ -16,7 +16,7 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
                     inbox: inbox,
                     additional_attributes: additional_attributes)
   end
-  let(:message) { instance_double(Message, conversation: conversation, additional_attributes: nil) }
+  let(:message) { instance_double(Message, conversation: conversation, additional_attributes: nil, has_attribute?: true, followup_execution_id: nil) }
 
   describe '#cloud_template_components' do
     let(:provider) { 'whatsapp_cloud' }
@@ -25,32 +25,32 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
 
     it 'builds named parameters separately for header and body' do
       template = instance_double(MessageTemplate,
-                                  components: [
-                                    { 'type' => 'HEADER', 'text' => 'Olá {{customer_name}}' },
-                                    { 'type' => 'BODY', 'text' => 'Pedido {{order_id}}' }
-                                  ],
-                                  metadata: { 'parameter_format' => 'NAMED' })
+                                 components: [
+                                   { 'type' => 'HEADER', 'text' => 'Olá {{customer_name}}' },
+                                   { 'type' => 'BODY', 'text' => 'Pedido {{order_id}}' }
+                                 ],
+                                 metadata: { 'parameter_format' => 'NAMED' })
 
       result = service.send(:cloud_template_components, template,
                             'processed_params' => { 'customer_name' => 'Ana', 'order_id' => '42' })
 
       expect(result).to eq([
-        { type: 'header', parameters: [{ type: 'text', parameter_name: 'customer_name', text: 'Ana' }] },
-        { type: 'body', parameters: [{ type: 'text', parameter_name: 'order_id', text: '42' }] }
-      ])
+                             { type: 'header', parameters: [{ type: 'text', parameter_name: 'customer_name', text: 'Ana' }] },
+                             { type: 'body', parameters: [{ type: 'text', parameter_name: 'order_id', text: '42' }] }
+                           ])
     end
 
     it 'orders positional body parameters by their placeholder number' do
       template = instance_double(MessageTemplate,
-                                  components: [{ 'type' => 'BODY', 'text' => '{{2}} then {{1}}' }],
-                                  metadata: { 'parameter_format' => 'POSITIONAL' })
+                                 components: [{ 'type' => 'BODY', 'text' => '{{2}} then {{1}}' }],
+                                 metadata: { 'parameter_format' => 'POSITIONAL' })
 
       result = service.send(:cloud_template_components, template,
                             'processed_params' => { '1' => 'first', '2' => 'second' })
 
       expect(result).to eq([
-        { type: 'body', parameters: [{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }] }
-      ])
+                             { type: 'body', parameters: [{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }] }
+                           ])
     end
   end
 
@@ -372,17 +372,17 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
     let(:additional_attributes) { nil }
     let(:retry_message) { instance_double(Message, id: 99, content_attributes: attributes, failed?: true, source_id: nil) }
     let(:attributes) { {} }
+    let(:message) { retry_message }
 
     it 'schedules at most two delayed retries only for an explicit HTTP 429' do
       provider_service = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_status: 429)
-      job = double('configured retry job')
-      allow(service).to receive(:message).and_return(retry_message)
-      allow(retry_message).to receive(:with_lock) { |&block| block.call }
+      job = instance_double(ActiveJob::ConfiguredJob)
+      allow(retry_message).to receive(:with_lock).and_yield
       expect(retry_message).to receive(:update!).with(content_attributes: {
-        'whatsapp_auto_retry_count' => 1,
-        'whatsapp_auto_retry_http_status' => 429,
-        'whatsapp_auto_retry_token' => kind_of(String)
-      })
+                                                        'whatsapp_auto_retry_count' => 1,
+                                                        'whatsapp_auto_retry_http_status' => 429,
+                                                        'whatsapp_auto_retry_token' => kind_of(String)
+                                                      })
       expect(Whatsapp::RetryRateLimitedMessageJob).to receive(:set).with(wait: 5.seconds).and_return(job)
       expect(job).to receive(:perform_later).with(99, 1, kind_of(String))
 
@@ -396,7 +396,7 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
 
       limited_service = described_class.new(message: retry_message)
       limited_provider = instance_double(Whatsapp::Providers::EvolutionService, last_delivery_status: 429)
-      allow(retry_message).to receive(:with_lock) { |&block| block.call }
+      allow(retry_message).to receive(:with_lock).and_yield
       allow(retry_message).to receive(:content_attributes).and_return({ 'whatsapp_auto_retry_count' => 2 })
       expect(Whatsapp::RetryRateLimitedMessageJob).not_to receive(:set)
       limited_service.send(:schedule_rate_limit_retry, limited_provider)
@@ -412,10 +412,16 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
     end
 
     before do
+      # Isolate the already-tested template preparation boundary while asserting provider failure propagation.
+      # rubocop:disable RSpec/SubjectStub
       allow(service).to receive(:processable_channel_message_template).and_return(
+        # rubocop:enable RSpec/SubjectStub
         ['template_name', 'namespace', 'pt_BR', []]
       )
+      # Isolate the already-tested template preparation boundary while asserting provider failure propagation.
+      # rubocop:disable RSpec/SubjectStub
       allow(service).to receive(:determine_target_number_for_sending).and_return('5511999999999')
+      # rubocop:enable RSpec/SubjectStub
       allow(channel).to receive(:provider_service).and_return(provider_service)
       allow(message).to receive(:id).and_return(99)
       allow(message).to receive(:is_unsupported).and_return(nil)
@@ -445,8 +451,8 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
         template_record = instance_double(MessageTemplate, approval_status: 'approved',
                                                            components: [{ 'type' => 'BODY', 'text' => 'Hi' }],
                                                            metadata: {})
-        active_templates = double('active templates', find_by: template_record)
-        templates = double('templates', active: active_templates)
+        active_templates = object_double(MessageTemplate.none, find_by: template_record)
+        templates = object_double(MessageTemplate.none, active: active_templates)
         allow(channel).to receive(:message_templates).and_return(templates)
         allow(provider_service).to receive(:send_template).and_return(nil)
         status_service = instance_double(Messages::StatusUpdateService, perform: true)

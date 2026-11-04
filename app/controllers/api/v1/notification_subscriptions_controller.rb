@@ -1,31 +1,44 @@
 class Api::V1::NotificationSubscriptionsController < Api::BaseController
-  before_action :set_user
+  def show
+    render json: { public_key: VapidService.public_key }
+  end
 
   def create
-    Rails.logger.info("📱 [SUBSCRIPTION API] Creating subscription for user #{@user.email}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Raw params: #{params.inspect}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Permitted params: #{notification_subscription_params.inspect}")
+    subscription = NotificationSubscriptionBuilder.new(user: current_user, params: notification_subscription_params).perform
+    render json: subscription
+  end
 
-    notification_subscription = NotificationSubscriptionBuilder.new(user: @user, params: notification_subscription_params).perform
+  def test
+    return head :unauthorized unless current_user
 
-    Rails.logger.info("📱 [SUBSCRIPTION API] Subscription created successfully: #{notification_subscription.id}, type: #{notification_subscription.subscription_type}")
+    subscription = current_user.notification_subscriptions.browser_push.find_by!(identifier: params.require(:endpoint))
+    unless Notification::TestPushNotificationJob.supported_endpoint?(subscription.identifier)
+      return render json: { error: 'Este serviço de push não é compatível com o teste.' }, status: :unprocessable_entity
+    end
 
-    render json: notification_subscription
+    unless Rails.cache.write("web-push-test:#{current_user.id}", true, expires_in: 30.seconds, unless_exist: true)
+      return render json: { error: 'Aguarde 30 segundos antes de enviar outro teste.' }, status: :too_many_requests
+    end
+
+    Notification::TestPushNotificationJob.set(wait: 10.seconds).perform_later(subscription.id, current_user.id)
+    render json: { delay_seconds: 10 }, status: :accepted
   end
 
   def destroy
-    notification_subscription = NotificationSubscription.where(["subscription_attributes->>'push_token' = ?", params[:push_token]]).first
-    notification_subscription.destroy! if notification_subscription.present?
+    subscriptions = current_user.notification_subscriptions
+    if params[:endpoint].present?
+      subscriptions.browser_push.where("subscription_attributes->>'endpoint' = ?", params[:endpoint]).destroy_all
+    elsif params[:push_token].present?
+      subscriptions.fcm.where("subscription_attributes->>'push_token' = ?", params[:push_token]).destroy_all
+    end
     head :ok
   end
 
   private
 
-  def set_user
-    @user = current_user
-  end
-
   def notification_subscription_params
-    params.require(:notification_subscription).permit(:subscription_type, subscription_attributes: {})
+    params.require(:notification_subscription).permit(
+      :subscription_type, subscription_attributes: [:endpoint, :p256dh, :auth, :push_token, :device_id]
+    )
   end
 end

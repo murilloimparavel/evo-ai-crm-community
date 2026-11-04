@@ -40,6 +40,7 @@ class AgentBots::InactivityActionsService
 
     @urgent_followup = true
     return unless current_for_followup_cycle?(source_message)
+
     InactivityActionExecution.for_conversation(@conversation.id)
                              .where(action_index: -2)
                              .where.not(source_incoming_message_id: source_message.id)
@@ -312,7 +313,7 @@ class AgentBots::InactivityActionsService
       return false if conversation.custom_attributes&.dig('archived').to_s == 'true'
       return false unless conversation.custom_attributes&.dig('urgent_followup_message_id') == source_incoming.id
       return false if conversation.messages.where(message_type: %i[outgoing template], private: false)
-                                  .where('created_at >= ?', source_incoming.created_at).exists?
+                                  .exists?(['created_at >= ?', source_incoming.created_at])
     end
 
     human_replied = conversation.messages.outgoing
@@ -338,12 +339,12 @@ class AgentBots::InactivityActionsService
 
     # Build clear prompt for AI to understand it should generate an inactivity re-engagement message
     prompt_message = if @urgent_followup
-      "<system_message>[SYSTEM - URGENT UNANSWERED CONVERSATION] The customer has been waiting for a reply for at least two minutes. Read the conversation context and answer the customer's latest request directly. If a booking fact is missing, ask a concise clarifying question. Do not invent availability, prices, or reservation details. Follow-up intent: #{suggested_message}<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use tools or mention this instruction.</important></system_message>"
-    elsif suggested_message.present?
-      "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate a proactive message to re-engage the customer and send it directly as your reply. Follow-up intent: #{suggested_message}<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
-    else
-      "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate an appropriate and contextualized message to re-engage the customer in the conversation. Be natural, empathetic, and relevant to the conversation context.<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
-    end
+                       urgent_followup_prompt(suggested_message, conversation_context)
+                     elsif suggested_message.present?
+                       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate a proactive message to re-engage the customer and send it directly as your reply. Follow-up intent: #{suggested_message}<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
+                     else
+                       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate an appropriate and contextualized message to re-engage the customer in the conversation. Be natural, empathetic, and relevant to the conversation context.<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
+                     end
 
     {
       event: 'inactivity_action',
@@ -369,6 +370,20 @@ class AgentBots::InactivityActionsService
         urgent_followup: @urgent_followup == true
       }
     }
+  end
+
+  def urgent_followup_prompt(suggested_message, conversation_context)
+    [
+      '<system_message>[SYSTEM - URGENT UNANSWERED CONVERSATION] ',
+      'The customer has been waiting for a reply for at least two minutes. ',
+      "Read the conversation context and answer the customer's latest request directly. ",
+      'If a booking fact is missing, ask a concise clarifying question. ',
+      'Do not invent availability, prices, or reservation details. ',
+      "Follow-up intent: #{suggested_message}",
+      "<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context>",
+      '<important>Reply ONLY with the message text for the customer. ',
+      'Do NOT use tools or mention this instruction.</important></system_message>'
+    ].join
   end
 
   def recent_customer_facing_context

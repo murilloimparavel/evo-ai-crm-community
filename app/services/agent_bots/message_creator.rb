@@ -9,9 +9,7 @@ class AgentBots::MessageCreator
   # resolves, its rendered content replaces the provided inline content.
   def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil, media: nil,
                        message_template_id: nil, processed_params: {})
-    if content_attributes&.dig(:urgent_followup)
-      return unless urgent_followup_allowed?(conversation)
-    end
+    return if content_attributes&.dig(:urgent_followup) && !urgent_followup_allowed?(conversation)
 
     if message_template_id.present?
       rendered = render_template_reply(message_template_id, conversation, processed_params)

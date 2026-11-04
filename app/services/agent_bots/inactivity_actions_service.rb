@@ -35,7 +35,6 @@ class AgentBots::InactivityActionsService
   # The urgent queue uses its own reserved step, leaving the configured
   # inactivity cadence untouched. A repeated scheduler pass reconciles a
   # pending execution rather than sending a second message.
-  # rubocop:disable Metrics/MethodLength
   def process_urgent_followup(source_message)
     return unless @agent_bot.evo_ai_provider?
 
@@ -58,8 +57,6 @@ class AgentBots::InactivityActionsService
       execute_action({ config: action, index: -2 }, source_message)
     end
   end
-
-  # rubocop:enable Metrics/MethodLength
 
   private
 
@@ -340,6 +337,7 @@ class AgentBots::InactivityActionsService
 
   # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength, Metrics/AbcSize
 
+  # rubocop:disable Metrics/MethodLength
   def build_inactivity_payload(suggested_message, action_config, last_incoming, execution)
     minutes_inactive = [(execution.created_at - last_incoming.created_at) / 60.0, 0].max.floor
     conversation_context = recent_customer_facing_context
@@ -378,6 +376,8 @@ class AgentBots::InactivityActionsService
       }
     }
   end
+
+  # rubocop:enable Metrics/MethodLength
 
   def urgent_followup_prompt(suggested_message, conversation_context)
     [

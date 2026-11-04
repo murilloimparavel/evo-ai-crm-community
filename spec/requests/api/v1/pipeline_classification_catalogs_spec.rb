@@ -244,7 +244,7 @@ RSpec.describe 'Pipeline classification catalog API', type: :request do
 
     get "#{url}/results", params: { limit: 2 }
     expect(response).to have_http_status(:ok)
-    expect(body['data'].map { |row| row['id'] }).to eq(rows.reverse.first(2).map(&:id))
+    expect(body['data'].map { |row| row['id'] }).to eq(rows.last(2).reverse.map(&:id))
 
     get "#{url}/results", params: { limit: 2, before_id: body.dig('data', -1, 'id') }
     expect(response).to have_http_status(:ok)

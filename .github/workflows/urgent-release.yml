@@ -56,12 +56,13 @@ jobs:
               test -f "$baseline_dir/$file" && printf '%s\n' "$baseline_dir/$file"
             done)
             if ((${#base_files[@]} > 0)); then
-              bundle exec rubocop --config "$baseline_dir/.rubocop.yml" --format json \
+              bundle exec rubocop --force-exclusion --config "$baseline_dir/.rubocop.yml" --format json \
                 --out "$RUNNER_TEMP/rubocop-base.json" "${base_files[@]}" || true
             else
               printf '{"files":[]}' > "$RUNNER_TEMP/rubocop-base.json"
             fi
-            bundle exec rubocop --format json --out "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}" || true
+            bundle exec rubocop --force-exclusion --format json \
+              --out "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}" || true
             ruby .github/scripts/compare_rubocop_results.rb \
               "$RUNNER_TEMP/rubocop-base.json" "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}"
             git worktree remove --force "$baseline_dir"

@@ -64,16 +64,7 @@ class Api::V1::PipelineClassificationCatalogsController < Api::V1::BaseControlle
   def results
     authorize @pipeline, :show?
     scope = PipelineClassificationResult.where(pipeline_id: @pipeline.id).order(created_at: :desc, id: :desc)
-    if params[:before_id].present?
-      valid_cursor = params[:before_id].match?(/\A[0-9a-f-]{36}\z/i)
-      raise PipelineClassification::Catalog::Invalid, 'invalid_results_cursor' unless valid_cursor
-
-      cursor = scope.find_by(id: params[:before_id])
-      raise PipelineClassification::Catalog::Invalid, 'invalid_results_cursor' unless cursor
-
-      scope = scope.where('created_at < :created_at OR (created_at = :created_at AND id < :id)',
-                          created_at: cursor.created_at, id: cursor.id)
-    end
+    scope = scope_for_results_cursor(scope)
     rows = scope.limit(params[:limit].presence&.to_i&.clamp(1, 100) || 50)
     success_response(data: rows.map { |row| result_data(row) })
   rescue PipelineClassification::Catalog::Invalid => e
@@ -184,6 +175,20 @@ class Api::V1::PipelineClassificationCatalogsController < Api::V1::BaseControlle
 
   def expected_hash
     params[:expected_hash].presence || request.headers['If-Match'].to_s.delete_prefix('"').delete_suffix('"')
+  end
+
+  def scope_for_results_cursor(scope)
+    cursor_id = params[:before_id]
+    return scope if cursor_id.blank?
+
+    valid_cursor = cursor_id.is_a?(String) && cursor_id.match?(/\A[0-9a-f-]{36}\z/i)
+    raise PipelineClassification::Catalog::Invalid, 'invalid_results_cursor' unless valid_cursor
+
+    cursor = scope.find_by(id: cursor_id)
+    raise PipelineClassification::Catalog::Invalid, 'invalid_results_cursor' unless cursor
+
+    scope.where('created_at < :created_at OR (created_at = :created_at AND id < :id)',
+                created_at: cursor.created_at, id: cursor.id)
   end
 
   def catalog_payload

@@ -21,9 +21,19 @@ end
 
 baseline = offense_counts(baseline_path, changed_files)
 head = offense_counts(head_path, changed_files)
+head_report = JSON.parse(File.read(head_path))
 new_offenses = head.filter_map do |key, count|
   increase = count - baseline[key]
-  "#{key[0]}: #{key[1]} gained #{increase} offense(s)" if increase.positive?
+  next unless increase.positive?
+
+  file = head_report.fetch('files').find do |entry|
+    path = entry.fetch('path').tr('\\', '/')
+    path == key[0] || path.end_with?("/#{key[0]}")
+  end
+  lines = file.fetch('offenses').filter_map do |offense|
+    offense.dig('location', 'start_line') if offense.fetch('cop_name') == key[1]
+  end
+  "#{key[0]}: #{key[1]} gained #{increase} offense(s) (lines: #{lines.join(', ')})"
 end
 
 abort new_offenses.join("\n") if new_offenses.any?

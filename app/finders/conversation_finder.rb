@@ -107,7 +107,7 @@ class ConversationFinder
     # Apply chip filters (unread / unanswered / groups / archived) — list-only
     query = apply_unread_filter(query)
     query = apply_unanswered_filter(query)
-      query = apply_urgent_filter(query)
+    query = apply_urgent_filter(query)
     query = apply_is_group_filter(query)
     query = apply_archived_filter(query)
 
@@ -198,7 +198,6 @@ class ConversationFinder
     else
       query
     end
-
   end
 
   # Chip "Não lidas": conversas com mensagens incoming não lidas pelo agente.

@@ -128,6 +128,20 @@ RSpec.describe Conversations::FilterService do
         .to contain_exactly(urgent_high.id)
     end
 
+    it 'combines urgent with the selected pipeline without including other conversations' do
+      owner = User.create!(name: 'Filter owner', email: "filter-owner-#{SecureRandom.hex(4)}@example.com")
+      pipeline = Pipeline.create!(name: "Urgent filter #{SecureRandom.hex(4)}", created_by: owner)
+      stage = pipeline.pipeline_stages.create!(name: 'New', position: 1)
+      [urgent_high, regular_high].each do |conversation|
+        PipelineItem.create!(pipeline: pipeline, pipeline_stage: stage, conversation: conversation)
+      end
+
+      pipeline_filter = row('pipeline_id', 'equal_to', [pipeline.id])
+      expect(filtered_ids(pipeline_filter)).to contain_exactly(urgent_high.id, regular_high.id)
+      expect(filtered_ids(row('urgent_followup', 'equal_to', ['true']), pipeline_filter))
+        .to contain_exactly(urgent_high.id)
+    end
+
     it 'treats an absent marker as false' do
       expect(filtered_ids(row('urgent_followup', 'equal_to', ['false']))).to contain_exactly(regular_high.id)
     end

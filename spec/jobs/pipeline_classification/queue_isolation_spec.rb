@@ -11,7 +11,7 @@ RSpec.describe 'pipeline classification queue isolation', type: :job do
                                    permitted_classes: [Symbol], aliases: true)
     schedule = YAML.safe_load(Rails.root.join('config/schedule.yml').read)
 
-    expect(worker_config.fetch(':queues')).to include('pipeline_classification')
+    expect(worker_config.fetch(:queues)).to include('pipeline_classification')
     expect(schedule.dig('pipeline_classification_scheduler_job', 'queue')).to eq('pipeline_classification')
     expect(schedule.dig('pipeline_classification_retention_job', 'queue')).to eq('pipeline_classification')
   end

@@ -14,7 +14,6 @@ class Notification::PushNotificationService
     Rails.logger.info("📱 [PUSH] User #{user.email} has #{notification_subscriptions.count} notification subscription(s)")
 
     notification_subscriptions.each do |subscription|
-      Rails.logger.info("📱 [PUSH] Processing subscription #{subscription.id}, type: #{subscription.subscription_type} (#{subscription.subscription_type_before_type_cast}), identifier: #{subscription.identifier}, push_token: #{subscription.subscription_attributes['push_token']&.first(20)}...")
       send_browser_push(subscription)
       send_fcm_push(subscription)
       send_push_via_evolution_hub(subscription)
@@ -29,7 +28,7 @@ class Notification::PushNotificationService
 
   def user_subscribed_to_notification?
     notification_setting = notification_settings.first
-    return true if notification_setting.public_send("push_#{notification.notification_type}?")
+    return true if notification_setting&.public_send("push_#{notification.notification_type}?")
 
     false
   end
@@ -40,14 +39,27 @@ class Notification::PushNotificationService
 
   def push_message
     {
-      title: notification.push_message_title,
-      tag: "#{notification.notification_type}_#{conversation.display_id}_#{notification.id}",
+      title: [channel_label, notification.push_message_title].reject(&:blank?).join(' · '),
+      body: 'Abra o app para ver a mensagem.',
+      notification_id: notification.id,
+      user_id: user.id,
+      channel: channel_label,
+      tag: "notification-#{notification.id}",
       url: push_url
     }
   end
 
+  def channel_label
+    inbox = conversation.try(:inbox)
+    return 'SOFIA Central' unless inbox
+
+    type = inbox.channel_type.to_s.delete_prefix('Channel::')
+    type = 'WhatsApp' if type.casecmp('whatsapp').zero?
+    [type, inbox.name].reject(&:blank?).uniq.join(' · ')
+  end
+
   def push_url
-    "#{ENV.fetch('FRONTEND_URL', 'http://localhost:3000')}/app/conversations/#{conversation.display_id}"
+    "#{ENV.fetch('FRONTEND_URL', 'http://localhost:3000').delete_suffix('/')}/conversations/#{conversation.display_id}"
   end
 
   def can_send_browser_push?(subscription)
@@ -76,7 +88,7 @@ class Notification::PushNotificationService
 
     WebPush.payload_send(**browser_push_payload(subscription))
     Rails.logger.info("Browser push sent to #{user.email} with title #{push_message[:title]}")
-  rescue WebPush::ExpiredSubscription, WebPush::InvalidSubscription, WebPush::Unauthorized => e
+  rescue WebPush::ExpiredSubscription, WebPush::InvalidSubscription => e
     Rails.logger.info "WebPush subscription expired: #{e.message}"
     subscription.destroy!
   rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout => e
@@ -87,20 +99,11 @@ class Notification::PushNotificationService
   end
 
   def send_fcm_push(subscription)
-    unless firebase_credentials_present?
-      Rails.logger.info("📱 [FCM] Push skipped: Firebase credentials not configured")
-      return
-    end
-    unless subscription.fcm?
-      Rails.logger.info("📱 [FCM] Push skipped: Subscription is not FCM type (type: #{subscription.subscription_type})")
-      return
-    end
+    return unless firebase_credentials_present? && subscription.fcm?
 
     begin
       project_id = GlobalConfigService.load('FIREBASE_PROJECT_ID', nil)
       credentials = GlobalConfigService.load('FIREBASE_CREDENTIALS_SECRET', nil)
-
-      Rails.logger.info("🔥 [FCM] Attempting to send push to #{user.email} (Project: #{project_id})")
 
       fcm_service = Notification::FcmService.new(project_id, credentials)
       fcm = fcm_service.fcm_client
@@ -129,7 +132,7 @@ class Notification::PushNotificationService
       Rails.logger.info("✅ [FCM] Firebase credentials found (Project ID: #{project_id})")
       true
     else
-      Rails.logger.info("⚠️  [FCM] Firebase credentials missing (Project ID: #{project_id.present? ? 'present' : 'missing'}, Credentials: #{credentials.present? ? 'present' : 'missing'})")
+      Rails.logger.info('FCM credentials missing')
       false
     end
   end

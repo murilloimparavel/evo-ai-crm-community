@@ -1,31 +1,28 @@
 class Api::V1::NotificationSubscriptionsController < Api::BaseController
-  before_action :set_user
+  def show
+    render json: { public_key: VapidService.public_key }
+  end
 
   def create
-    Rails.logger.info("📱 [SUBSCRIPTION API] Creating subscription for user #{@user.email}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Raw params: #{params.inspect}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Permitted params: #{notification_subscription_params.inspect}")
-
-    notification_subscription = NotificationSubscriptionBuilder.new(user: @user, params: notification_subscription_params).perform
-
-    Rails.logger.info("📱 [SUBSCRIPTION API] Subscription created successfully: #{notification_subscription.id}, type: #{notification_subscription.subscription_type}")
-
-    render json: notification_subscription
+    subscription = NotificationSubscriptionBuilder.new(user: current_user, params: notification_subscription_params).perform
+    render json: subscription
   end
 
   def destroy
-    notification_subscription = NotificationSubscription.where(["subscription_attributes->>'push_token' = ?", params[:push_token]]).first
-    notification_subscription.destroy! if notification_subscription.present?
+    subscriptions = current_user.notification_subscriptions
+    if params[:endpoint].present?
+      subscriptions.browser_push.where("subscription_attributes->>'endpoint' = ?", params[:endpoint]).destroy_all
+    elsif params[:push_token].present?
+      subscriptions.fcm.where("subscription_attributes->>'push_token' = ?", params[:push_token]).destroy_all
+    end
     head :ok
   end
 
   private
 
-  def set_user
-    @user = current_user
-  end
-
   def notification_subscription_params
-    params.require(:notification_subscription).permit(:subscription_type, subscription_attributes: {})
+    params.require(:notification_subscription).permit(
+      :subscription_type, subscription_attributes: [:endpoint, :p256dh, :auth, :push_token, :device_id]
+    )
   end
 end

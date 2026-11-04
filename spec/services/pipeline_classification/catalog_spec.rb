@@ -116,6 +116,17 @@ RSpec.describe PipelineClassification::Catalog do
     expect { save_catalog(bad) }.to raise_error(described_class::Invalid, /unsupported/)
   end
 
+  it 'accepts exactly ten minutes of debounce and rejects any larger interval' do
+    accepted = payload
+    accepted['classification']['debounce_ms'] = 600_000
+    save_catalog(accepted)
+    expect(pipeline.reload.config.dig('classification', 'debounce_ms')).to eq(600_000)
+    rejected = payload
+    rejected['classification']['debounce_ms'] = 600_001
+    expect { save_catalog(rejected) }.to raise_error(described_class::Invalid, /debounce_ms/)
+    expect(pipeline.reload.config.dig('classification', 'debounce_ms')).to eq(600_000)
+  end
+
   it 'rejects overlarge catalogs locally without transport' do
     bad = payload
     bad['stages'][0]['classification_profile']['entry_criteria'] = Array.new(9, 'customer asks')

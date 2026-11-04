@@ -11,7 +11,7 @@ module PipelineClassification
       invalid!('enabled/mode mismatch') unless [true, false].include?(profile['enabled']) && %w[off observe auto].include?(profile['mode']) &&
                                                profile['enabled'] == (profile['mode'] != 'off')
       text!(profile['purpose'], allow_empty: !profile['enabled'])
-      { 'debounce_ms' => 250..300_000, 'snapshot_ttl_seconds' => 30..3600, 'result_ttl_seconds' => 30..3600 }.each do |key, range|
+      { 'debounce_ms' => 250..600_000, 'snapshot_ttl_seconds' => 30..3600, 'result_ttl_seconds' => 30..3600 }.each do |key, range|
         invalid!("invalid #{key}") unless profile[key].is_a?(Integer) && range.cover?(profile[key])
       end
       inboxes = profile['inbox_ids']

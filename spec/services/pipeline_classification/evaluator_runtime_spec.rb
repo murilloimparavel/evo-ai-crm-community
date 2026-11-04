@@ -103,6 +103,71 @@ RSpec.describe PipelineClassification::Evaluator do
     expect(state(b).generation).to eq(generation)
   end
 
+  # Exercise real scheduling with an injected provider; no network calls or wall-clock waits.
+  it 'waits ten quiet minutes, starts snapshot TTL at evaluation and never polls the provider again' do # rubocop:disable RSpec/ExampleLength, RSpec/MultipleExpectations
+    travel_to(Time.current.change(usec: 0))
+    b = business(debounce: 600_000)
+    expect(b[:catalog].snapshot.dig('classification', 'snapshot_ttl_seconds')).to eq(300)
+    start = Time.current
+    incoming(b)
+    client = instance_double(Ai::JevClient, call: response)
+    allow(PipelineClassification::EvaluateJob).to receive(:perform_later) do |id|
+      described_class.new(result: PipelineClassificationResult.find(id), client: client,
+                          budget: PipelineClassification::Budget.new(offline: true)).call
+    end
+
+    travel_to(start + 9.minutes + 59.seconds)
+    2.times { PipelineClassification::SchedulerJob.perform_now }
+    expect(client).not_to have_received(:call)
+    expect(PipelineClassificationResult.count).to eq(0)
+
+    travel_to(start + 10.minutes)
+    2.times { PipelineClassification::SchedulerJob.perform_now }
+    row = PipelineClassificationResult.sole
+    expect(client).to have_received(:call).once
+    expect(row.status).to eq('classified')
+    expect(row.created_at).to eq(Time.current)
+    expect(row.expires_at).to eq(row.created_at + 300.seconds)
+    expect(described_class.new(result: row).current?).to be(true)
+
+    travel 301.seconds
+    2.times { PipelineClassification::SchedulerJob.perform_now }
+    expect(described_class.new(result: row.reload).current?).to be(false)
+    expect(client).to have_received(:call).once
+    expect(PipelineClassificationResult.count).to eq(1)
+    expect(state(b).due_at).to be_nil
+  ensure
+    travel_back
+  end
+
+  it 'extends a burst arriving at nine minutes until ten minutes after its last incoming' do
+    travel_to(Time.current.change(usec: 0))
+    b = business(debounce: 600_000)
+    start = Time.current
+    incoming(b)
+    travel_to(start + 9.minutes)
+    last = incoming(b, text: 'I am still choosing')
+    incoming(b, text: 'Please consider these options too')
+    expect(state(b).due_at).to eq(last.created_at + 10.minutes)
+    client = instance_double(Ai::JevClient, call: response)
+    allow(PipelineClassification::EvaluateJob).to receive(:perform_later) do |id|
+      described_class.new(result: PipelineClassificationResult.find(id), client: client,
+                          budget: PipelineClassification::Budget.new(offline: true)).call
+    end
+    travel_to(start + 10.minutes)
+    PipelineClassification::SchedulerJob.perform_now
+    travel_to(start + 19.minutes - 1.second)
+    PipelineClassification::SchedulerJob.perform_now
+    expect(client).not_to have_received(:call)
+    expect(PipelineClassificationResult.count).to eq(0)
+    travel 1.second
+    2.times { PipelineClassification::SchedulerJob.perform_now }
+    expect(client).to have_received(:call).once
+    expect(PipelineClassificationResult.sole.status).to eq('classified')
+  ensure
+    travel_back
+  end
+
   it 'recovers a persisted due state once and prevents duplicate provider claims' do
     b = business
     incoming(b)

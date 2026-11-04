@@ -10,14 +10,9 @@ class AgentBots::MessageCreator
   def create_bot_reply(content, conversation, force: false, content_type: 'text', content_attributes: nil, media: nil,
                        message_template_id: nil, processed_params: {})
     if content_attributes&.dig(:urgent_followup)
-      conversation.reload
-      return unless (conversation.open? || conversation.pending?) && conversation.custom_attributes&.dig('archived').to_s != 'true'
-      source = conversation.messages.incoming.order(created_at: :desc).first
-      return unless source && source.created_at > 24.hours.ago &&
-                    conversation.custom_attributes&.dig('urgent_followup_message_id') == source.id
-      return if conversation.messages.where(message_type: %i[outgoing template], private: false)
-                            .where('created_at >= ?', source.created_at).exists?
+      return unless urgent_followup_allowed?(conversation)
     end
+
     if message_template_id.present?
       rendered = render_template_reply(message_template_id, conversation, processed_params)
       content = rendered if rendered.present?
@@ -39,6 +34,19 @@ class AgentBots::MessageCreator
   end
 
   private
+
+  def urgent_followup_allowed?(conversation)
+    conversation.reload
+    return false unless conversation.open? || conversation.pending?
+    return false if conversation.custom_attributes&.dig('archived').to_s == 'true'
+
+    source = conversation.messages.incoming.order(created_at: :desc).first
+    return false unless source && source.created_at > 24.hours.ago
+    return false unless conversation.custom_attributes&.dig('urgent_followup_message_id') == source.id
+
+    !conversation.messages.where(message_type: %i[outgoing template], private: false)
+                 .exists?(['created_at >= ?', source.created_at])
+  end
 
   # Resolves the template (global-aware) and renders it; returns nil on a miss or
   # a missing required variable so the caller keeps the provided inline content.
@@ -62,6 +70,7 @@ class AgentBots::MessageCreator
     unless agent_bot_inbox
       Rails.logger.warn "[AgentBot HTTP] No AgentBotInbox found for agent_bot #{@agent_bot.id} and inbox #{conversation.inbox.id}"
       return false if urgent_followup
+
       # Fallback to legacy behavior: only pending conversations
       is_pending = conversation.status == 'pending'
       Rails.logger.debug { "[AgentBot HTTP] Conversation status check (legacy): #{conversation.status} -> eligible: #{is_pending}" }

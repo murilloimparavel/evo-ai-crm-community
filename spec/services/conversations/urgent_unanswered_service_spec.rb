@@ -10,7 +10,7 @@ RSpec.describe Conversations::UrgentUnansweredService do
   def insert_message(type, at)
     # Insert historical timestamps without dispatching customer-facing callbacks.
     # rubocop:disable Rails/SkipsModelValidations
-    Message.insert!({
+    attributes = {
       id: SecureRandom.uuid,
       inbox_id: inbox.id,
       conversation_id: conversation.id,
@@ -18,7 +18,8 @@ RSpec.describe Conversations::UrgentUnansweredService do
       content: 'Message',
       created_at: at,
       updated_at: at
-    })
+    }
+    Message.insert!(attributes)
     # rubocop:enable Rails/SkipsModelValidations
   end
 

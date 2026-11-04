@@ -133,14 +133,7 @@ class AgentBots::ResponseProcessor
     return true if source_id.blank? || latest_incoming&.id.to_s != source_id.to_s
     return true if !urgent_followup? && conversation.custom_attributes&.dig('urgent_followup') == true
     return true if conversation.assignee_id.present? && !urgent_followup?
-    if urgent_followup?
-      return true unless conversation.open? || conversation.pending?
-      return true if conversation.custom_attributes&.dig('archived').to_s == 'true'
-      return true if latest_incoming.created_at <= 24.hours.ago
-      return true unless conversation.custom_attributes&.dig('urgent_followup_message_id').to_s == source_id.to_s
-      return true if conversation.messages.where(message_type: %i[outgoing template], private: false)
-                                 .where('created_at >= ?', latest_incoming.created_at).exists?
-    end
+    return true if urgent_followup? && stale_urgent_followup?(conversation, latest_incoming, source_id)
 
     human_replied = conversation.messages.outgoing
                                .where(sender_type: 'User', private: false)
@@ -172,6 +165,16 @@ class AgentBots::ResponseProcessor
   def urgent_followup?
     metadata = @payload[:inactivity_metadata] || @payload['inactivity_metadata']
     metadata&.dig(:urgent_followup) == true || metadata&.dig('urgent_followup') == true
+  end
+
+  def stale_urgent_followup?(conversation, latest_incoming, source_id)
+    return true unless conversation.open? || conversation.pending?
+    return true if conversation.custom_attributes&.dig('archived').to_s == 'true'
+    return true if latest_incoming.created_at <= 24.hours.ago
+    return true unless conversation.custom_attributes&.dig('urgent_followup_message_id').to_s == source_id.to_s
+
+    conversation.messages.where(message_type: %i[outgoing template], private: false)
+                .exists?(['created_at >= ?', latest_incoming.created_at])
   end
 
   def message_for_inactivity_execution(conversation, execution_id)

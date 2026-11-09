@@ -23,8 +23,8 @@ class Api::V1::Integrations::OpenaiController < Api::V1::BaseController
       render json: { error: 'Unable to process request' }, status: :unprocessable_entity
     end
   rescue StandardError => e
-    Rails.logger.error "OpenAI Global Processing Error: #{e.message}"
-    render json: { error: e.message }, status: :unprocessable_entity
+    Rails.logger.error("OpenAI Global Processing Error: #{e.class}")
+    render json: { error: 'Não foi possível processar a solicitação de IA.' }, status: :bad_gateway
   end
 
   private

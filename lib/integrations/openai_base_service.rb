@@ -1,3 +1,6 @@
+require 'socket'
+require 'timeout'
+
 class Integrations::OpenaiBaseService
   # gpt-4.1-nano supports 128,000 tokens
   # 1 token is approx 4 characters
@@ -175,12 +178,18 @@ class Integrations::OpenaiBaseService
     response = HTTParty.post(api_url, headers: headers, body: body)
     Rails.logger.info("OpenAI API response provider=#{provider} status=#{response.code}")
 
-    return { error: response.parsed_response, error_code: response.code } unless response.success?
+    return { error: { message: 'O provedor de IA recusou a solicitação.' }, error_code: response.code } unless response.success?
 
     choices = JSON.parse(response.body)['choices']
+    content = choices.first&.dig('message', 'content') if choices.present?
 
-    return { message: choices.first['message']['content'] } if choices.present?
+    return { message: content } if content.present?
 
-    { message: nil }
+    { error: { message: 'O provedor de IA retornou uma resposta vazia.' }, error_code: response.code }
+  rescue JSON::ParserError
+    { error: { message: 'O provedor de IA retornou uma resposta inválida.' }, error_code: 502 }
+  rescue HTTParty::Error, SocketError, Timeout::Error => e
+    Rails.logger.warn("OpenAI API transport failure provider=#{provider} error=#{e.class}")
+    { error: { message: 'Não foi possível conectar ao provedor de IA.' }, error_code: 502 }
   end
 end

@@ -1,3 +1,6 @@
+require 'socket'
+require 'timeout'
+
 class Integrations::Openai::GlobalProcessorService
   include ActiveModel::Model
 
@@ -12,7 +15,7 @@ class Integrations::Openai::GlobalProcessorService
 
   def perform
     return nil unless valid_event_name?
-    return nil unless global_config_available?
+    return configuration_error unless global_config_available?
 
     result = send("#{event_name}_message")
     return result if result.is_a?(Hash) && result[:error].present?
@@ -39,10 +42,22 @@ class Integrations::Openai::GlobalProcessorService
     api_url.present? && api_key.present? && gpt_model.present?
   end
 
+  def configuration_error
+    message = if api_key.blank?
+                'Credencial de IA não configurada.'
+              elsif api_url.blank?
+                'Endpoint de IA não configurado.'
+              else
+                'Modelo de IA não configurado.'
+              end
+
+    { error: { message: message }, error_code: 503 }
+  end
+
   # Endpoint from the same credential as the key: mixing halves points a valid
   # key at the wrong server.
   def api_url
-    @api_url ||= credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', nil)
+    @api_url ||= (credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', nil))&.chomp('/')
   end
 
   # The registry is the single source; the pre-registry global/hook chain is the
@@ -147,7 +162,7 @@ class Integrations::Openai::GlobalProcessorService
     response = HTTParty.post(full_api_url, headers: headers, body: body)
     Rails.logger.info("OpenAI Global API response provider=#{provider} status=#{response.code}")
 
-    return { error: response.parsed_response, error_code: response.code } unless response.success?
+    return provider_error(response.code) unless response.success?
 
     choices = JSON.parse(response.body)['choices']
     content = choices.first&.dig('message', 'content') if choices.present?
@@ -155,6 +170,15 @@ class Integrations::Openai::GlobalProcessorService
     return { message: content } if content.present?
 
     { error: { message: 'O provedor de IA retornou uma resposta vazia.' }, error_code: response.code }
+  rescue JSON::ParserError
+    { error: { message: 'O provedor de IA retornou uma resposta inválida.' }, error_code: 502 }
+  rescue HTTParty::Error, SocketError, Timeout::Error => e
+    Rails.logger.warn("OpenAI Global API transport failure provider=#{provider} error=#{e.class}")
+    { error: { message: 'Não foi possível conectar ao provedor de IA.' }, error_code: 502 }
+  end
+
+  def provider_error(status)
+    { error: { message: 'O provedor de IA recusou a solicitação.' }, error_code: status }
   end
 
   def rephrase_message

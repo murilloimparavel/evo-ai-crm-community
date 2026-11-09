@@ -31,16 +31,17 @@ class Api::V1::Integrations::OpenaiController < Api::V1::BaseController
 
   def provider_error_message(error, error_code)
     payload = error.is_a?(Hash) ? error : {}
-    nested = payload['error'] || payload[:error]
-    detail = if nested.is_a?(Hash)
-               nested['message'] || nested[:message]
-             elsif nested.is_a?(String)
-               nested
-             end
-    detail ||= payload['message'] || payload[:message]
+    detail = nested_error_message(payload) || payload['message'] || payload[:message]
     return detail if detail.present?
 
     error_code.present? ? "Falha do provedor de IA (HTTP #{error_code})." : 'O provedor de IA recusou a solicitação.'
+  end
+
+  def nested_error_message(payload)
+    nested = payload['error'] || payload[:error]
+    return nested['message'] || nested[:message] if nested.is_a?(Hash)
+
+    nested if nested.is_a?(String)
   end
 
   def permitted_event_params

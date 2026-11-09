@@ -6,6 +6,9 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
     allow(GlobalConfigService).to receive(:load).and_wrap_original do |_method, key, default|
       default
     end
+    allow(Ai::CredentialResolver).to receive(:resolve_endpoint)
+      .with(for_consumer: :inbox_assist)
+      .and_return(Ai::CredentialResolver::Endpoint.new(key: nil, provider: nil))
   end
 
   describe 'GET #show' do
@@ -16,13 +19,14 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
 
     it 'exposes exactly the expected top-level keys (catches accidental additions/removals)' do
       get :show, format: :json
-      json = JSON.parse(response.body)
+      json = response.parsed_body
 
       expected_keys = %w[
         fbAppId fbApiVersion wpAppId wpApiVersion wpWhatsappConfigId
         instagramAppId googleOAuthClientId azureAppId
         hasFacebookConfig hasWhatsappConfig hasInstagramConfig
-        hasEvolutionConfig hasEvolutionGoConfig hasTwitterConfig
+        hasEvolutionConfig hasEvolutionGoConfig hasEvolutionHubConfig
+        evolutionHubEnabled hubAllowExistingChannels hasTwitterConfig
         openaiConfigured enableAccountSignup recaptchaSiteKey clarityProjectId
       ]
 
@@ -35,7 +39,7 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
       allow(GlobalConfigService).to receive(:load).with('RECAPTCHA_SITE_KEY', nil).and_return('6Lc_test_key')
 
       get :show, format: :json
-      json = JSON.parse(response.body)
+      json = response.parsed_body
       expect(json['recaptchaSiteKey']).to eq('6Lc_test_key')
     end
 
@@ -43,19 +47,19 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
       allow(GlobalConfigService).to receive(:load).with('CLARITY_PROJECT_ID', nil).and_return('clarity_test_id')
 
       get :show, format: :json
-      json = JSON.parse(response.body)
+      json = response.parsed_body
       expect(json['clarityProjectId']).to eq('clarity_test_id')
     end
 
     it 'returns nil for unconfigured recaptchaSiteKey' do
       get :show, format: :json
-      json = JSON.parse(response.body)
+      json = response.parsed_body
       expect(json['recaptchaSiteKey']).to be_nil
     end
 
     it 'returns nil for unconfigured clarityProjectId' do
       get :show, format: :json
-      json = JSON.parse(response.body)
+      json = response.parsed_body
       expect(json['clarityProjectId']).to be_nil
     end
 
@@ -79,7 +83,7 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
           end
 
           get :show, format: :json
-          json = JSON.parse(response.body)
+          json = response.parsed_body
           expect(json[flag]).to be true
         end
 
@@ -90,13 +94,13 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
           end
 
           get :show, format: :json
-          json = JSON.parse(response.body)
+          json = response.parsed_body
           expect(json[flag]).to be false
         end
 
         it "returns #{flag} false when every required key is nil (default)" do
           get :show, format: :json
-          json = JSON.parse(response.body)
+          json = response.parsed_body
           expect(json[flag]).to be false
         end
       end
@@ -106,32 +110,35 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
       it 'returns true when an OpenAI-compatible endpoint, URL and model are set' do
         allow(GlobalConfigService).to receive(:load).with('OPENAI_API_URL', '').and_return('https://api.openai.com')
         allow(GlobalConfigService).to receive(:load).with('OPENAI_MODEL', '').and_return('gpt-4')
-        allow(Ai::CredentialResolver).to receive(:resolve_endpoint).with(for_consumer: :inbox_assist)
+        allow(Ai::CredentialResolver).to receive(:resolve_endpoint)
+          .with(for_consumer: :inbox_assist)
           .and_return(Ai::CredentialResolver::Endpoint.new(key: 'sk-test', provider: 'openai'))
 
         get :show, format: :json
-        json = JSON.parse(response.body)
+        json = response.parsed_body
         expect(json['openaiConfigured']).to be true
       end
 
       it 'returns false when any OpenAI field is missing' do
         allow(GlobalConfigService).to receive(:load).with('OPENAI_API_URL', '').and_return('https://api.openai.com')
         allow(GlobalConfigService).to receive(:load).with('OPENAI_MODEL', '').and_return('gpt-4')
-        allow(Ai::CredentialResolver).to receive(:resolve_endpoint).with(for_consumer: :inbox_assist)
+        allow(Ai::CredentialResolver).to receive(:resolve_endpoint)
+          .with(for_consumer: :inbox_assist)
           .and_return(Ai::CredentialResolver::Endpoint.new(key: nil, provider: 'openai'))
 
         get :show, format: :json
-        json = JSON.parse(response.body)
+        json = response.parsed_body
         expect(json['openaiConfigured']).to be false
       end
 
       it 'returns true for OpenRouter without the OpenAI URL setting' do
-        allow(Ai::CredentialResolver).to receive(:resolve_endpoint).with(for_consumer: :inbox_assist)
+        allow(Ai::CredentialResolver).to receive(:resolve_endpoint)
+          .with(for_consumer: :inbox_assist)
           .and_return(Ai::CredentialResolver::Endpoint.new(key: 'sk-or-test', provider: 'openrouter',
                                                            base_url: 'https://openrouter.ai/api/v1'))
 
         get :show, format: :json
-        expect(JSON.parse(response.body)['openaiConfigured']).to be true
+        expect(response.parsed_body['openaiConfigured']).to be true
       end
     end
 
@@ -140,13 +147,13 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
         allow(GlobalConfigService).to receive(:load).with('ENABLE_ACCOUNT_SIGNUP', 'false').and_return('true')
 
         get :show, format: :json
-        json = JSON.parse(response.body)
+        json = response.parsed_body
         expect(json['enableAccountSignup']).to be true
       end
 
       it 'returns false by default' do
         get :show, format: :json
-        json = JSON.parse(response.body)
+        json = response.parsed_body
         expect(json['enableAccountSignup']).to be false
       end
     end

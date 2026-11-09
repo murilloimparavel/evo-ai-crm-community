@@ -162,34 +162,45 @@ class Integrations::OpenaiBaseService
 
   def make_api_call(body)
     current_api_key = api_key
+    return missing_api_key_error if current_api_key.blank?
 
-    if current_api_key.blank?
-      Rails.logger.error('OpenAI API key not configured. Please configure it in Admin settings.')
-      return { error: 'OpenAI API key not configured', error_code: 401 }
-    end
+    response = request_provider(body, current_api_key)
+    return response if response.is_a?(Hash)
 
-    headers = {
-      'Content-Type' => 'application/json',
-      'Authorization' => "Bearer #{current_api_key}"
-    }
-
-    provider = credential_endpoint.provider.presence || 'legacy'
-    Rails.logger.info("OpenAI API request provider=#{provider} model=#{gpt_model}")
-    response = HTTParty.post(api_url, headers: headers, body: body)
-    Rails.logger.info("OpenAI API response provider=#{provider} status=#{response.code}")
-
-    return { error: { message: 'O provedor de IA recusou a solicitação.' }, error_code: response.code } unless response.success?
-
-    choices = JSON.parse(response.body)['choices']
-    content = choices.first&.dig('message', 'content') if choices.present?
-
-    return { message: content } if content.present?
-
-    { error: { message: 'O provedor de IA retornou uma resposta vazia.' }, error_code: response.code }
+    provider_result(response)
   rescue JSON::ParserError
     { error: { message: 'O provedor de IA retornou uma resposta inválida.' }, error_code: 502 }
+  end
+
+  def missing_api_key_error
+    Rails.logger.error('OpenAI API key not configured. Please configure it in Admin settings.')
+    { error: 'OpenAI API key not configured', error_code: 401 }
+  end
+
+  def request_provider(body, current_api_key)
+    provider = credential_endpoint.provider.presence || 'legacy'
+    Rails.logger.info("OpenAI API request provider=#{provider} model=#{gpt_model}")
+    response = HTTParty.post(api_url, headers: api_headers(current_api_key), body: body)
+    Rails.logger.info("OpenAI API response provider=#{provider} status=#{response.code}")
+    response
   rescue HTTParty::Error, SocketError, Timeout::Error => e
     Rails.logger.warn("OpenAI API transport failure provider=#{provider} error=#{e.class}")
     { error: { message: 'Não foi possível conectar ao provedor de IA.' }, error_code: 502 }
+  end
+
+  def api_headers(current_api_key)
+    {
+      'Content-Type' => 'application/json',
+      'Authorization' => "Bearer #{current_api_key}"
+    }
+  end
+
+  def provider_result(response)
+    return { error: { message: 'O provedor de IA recusou a solicitação.' }, error_code: response.code } unless response.success?
+
+    content = JSON.parse(response.body).dig('choices', 0, 'message', 'content')
+    return { message: content } if content.present?
+
+    { error: { message: 'O provedor de IA retornou uma resposta vazia.' }, error_code: response.code }
   end
 end

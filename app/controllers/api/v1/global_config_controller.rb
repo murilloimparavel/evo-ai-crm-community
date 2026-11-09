@@ -63,15 +63,11 @@ class Api::V1::GlobalConfigController < Api::BaseController
     endpoint = Ai::CredentialResolver.resolve_endpoint(for_consumer: :inbox_assist)
     return false unless endpoint&.key.present?
 
-    if endpoint.provider == 'openrouter'
-      model = GlobalConfigService.load('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL).to_s.strip
-      model = Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL if model.blank?
-      model.present?
-    else
-      api_url = endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', '').to_s.strip
-      model = GlobalConfigService.load('OPENAI_MODEL', '').to_s.strip
-      api_url.present? && model.present?
-    end
+    return true if endpoint.provider == 'openrouter'
+
+    api_url = endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', '').to_s.strip
+    model = GlobalConfigService.load('OPENAI_MODEL', '').to_s.strip
+    api_url.present? && model.present?
   end
 
   # Evolution Hub is "active" when both the toggle is on AND the required

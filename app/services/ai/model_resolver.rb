@@ -10,7 +10,7 @@ class Ai::ModelResolver
     normalized = openrouter_model.to_s.strip.presence || model.to_s.strip
     normalized = OPENROUTER_DEFAULT_MODEL if normalized.blank?
     normalized = normalized.delete_prefix(OPENROUTER_PROVIDER_PREFIX)
-    return "openai/#{normalized}" if normalized.present? && !normalized.include?('/')
+    return "openai/#{normalized}" if normalized.present? && normalized.exclude?('/')
 
     normalized
   end

@@ -5,21 +5,26 @@ require 'rails_helper'
 RSpec.describe Integrations::Openai::GlobalProcessorService do
   it 'uses the inbox-assist credential for chat events' do
     service = described_class.new(account: nil, event: { 'name' => 'rephrase' })
-    endpoint = Ai::CredentialResolver::Endpoint.new(key: 'key', base_url: nil, provider: 'openrouter')
+    endpoint = Ai::CredentialResolver::Endpoint.new(key: 'key', base_url: 'https://openrouter.ai/api/v1',
+                                                     provider: 'openrouter')
     expect(Ai::CredentialResolver).to receive(:resolve_endpoint)
       .with(for_consumer: :inbox_assist).and_return(endpoint)
 
     expect(service.send(:credential_endpoint)).to eq(endpoint)
     expect(service.send(:api_url)).to eq('https://openrouter.ai/api/v1')
-    allow(GlobalConfigService).to receive(:load).with('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL)
+    allow(GlobalConfigService).to receive(:load)
+      .with('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL)
       .and_return('anthropic/claude-sonnet')
     expect(service.send(:gpt_model)).to eq('anthropic/claude-sonnet')
   end
 
   it 'normalizes a configured OpenRouter URL with a trailing slash' do
     service = described_class.new(account: nil, event: { 'name' => 'rephrase' })
-    endpoint = Ai::CredentialResolver::Endpoint.new(key: 'key', base_url: 'https://openrouter.ai/api/v1/',
-                                                     provider: 'openrouter')
+    endpoint = Ai::CredentialResolver::Endpoint.new(
+      key: 'key',
+      base_url: 'https://openrouter.ai/api/v1/',
+      provider: 'openrouter'
+    )
     allow(Ai::CredentialResolver).to receive(:resolve_endpoint).and_return(endpoint)
 
     expect(service.send(:api_url)).to eq('https://openrouter.ai/api/v1')
@@ -45,10 +50,31 @@ RSpec.describe Integrations::Openai::GlobalProcessorService do
     expect(service.send(:credential_endpoint)).to eq(endpoint)
   end
 
+  it 'sends chat completions to OpenRouter and returns the generated message' do
+    service = described_class.new(account: nil, event: { 'name' => 'rephrase' })
+    endpoint = Ai::CredentialResolver::Endpoint.new(key: 'key', base_url: 'https://openrouter.ai/api/v1',
+                                                     provider: 'openrouter')
+    allow(Ai::CredentialResolver).to receive(:resolve_endpoint).and_return(endpoint)
+    allow(service).to receive(:gpt_model).and_return('anthropic/claude-sonnet')
+    response = instance_double(HTTParty::Response, code: 200, success?: true,
+                                                   body: '{"choices":[{"message":{"content":"Olá!"}}]}')
+    expect(HTTParty).to receive(:post).with(
+      'https://openrouter.ai/api/v1/chat/completions',
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => 'Bearer key' },
+      body: '{}'
+    ).and_return(response)
+
+    expect(service.send(:make_api_call, '{}')).to eq(message: 'Olá!')
+  end
+
   it 'returns a safe gateway error when the provider response is not valid JSON' do
     service = described_class.new(account: nil, event: { 'name' => 'rephrase', 'data' => { 'content' => 'private text' } })
-    allow(service).to receive_messages(api_url: 'https://openrouter.ai/api/v1/chat/completions', api_key: 'key',
-                                       gpt_model: 'openai/gpt-4.1-nano')
+    allow(service).to receive_messages(
+      api_url: 'https://openrouter.ai/api/v1/chat/completions',
+      api_key: 'key',
+      gpt_model: 'openai/gpt-4.1-nano',
+      credential_endpoint: Ai::CredentialResolver::Endpoint.new(key: 'key', provider: 'openrouter')
+    )
     response = instance_double(HTTParty::Response, code: 200, success?: true, body: 'not-json')
     allow(HTTParty).to receive(:post).and_return(response)
 
@@ -59,8 +85,12 @@ RSpec.describe Integrations::Openai::GlobalProcessorService do
 
   it 'does not include provider response content in errors' do
     service = described_class.new(account: nil, event: { 'name' => 'rephrase' })
-    allow(service).to receive_messages(api_url: 'https://openrouter.ai/api/v1/chat/completions', api_key: 'key',
-                                       gpt_model: 'openai/gpt-4.1-nano')
+    allow(service).to receive_messages(
+      api_url: 'https://openrouter.ai/api/v1/chat/completions',
+      api_key: 'key',
+      gpt_model: 'openai/gpt-4.1-nano',
+      credential_endpoint: Ai::CredentialResolver::Endpoint.new(key: 'key', provider: 'openrouter')
+    )
     response = instance_double(HTTParty::Response, code: 429, success?: false)
     allow(HTTParty).to receive(:post).and_return(response)
 
@@ -71,8 +101,12 @@ RSpec.describe Integrations::Openai::GlobalProcessorService do
 
   it 'converts provider connection failures into a gateway error' do
     service = described_class.new(account: nil, event: { 'name' => 'rephrase' })
-    allow(service).to receive_messages(api_url: 'https://openrouter.ai/api/v1/chat/completions', api_key: 'key',
-                                       gpt_model: 'openai/gpt-4.1-nano')
+    allow(service).to receive_messages(
+      api_url: 'https://openrouter.ai/api/v1/chat/completions',
+      api_key: 'key',
+      gpt_model: 'openai/gpt-4.1-nano',
+      credential_endpoint: Ai::CredentialResolver::Endpoint.new(key: 'key', provider: 'openrouter')
+    )
     allow(HTTParty).to receive(:post).and_raise(SocketError, 'secret host detail')
 
     expect(service.send(:make_api_call, '{}')).to eq(

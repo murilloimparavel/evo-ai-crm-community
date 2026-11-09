@@ -46,5 +46,19 @@ RSpec.describe 'Integrations OpenAI RBAC', type: :request do
 
       expect(response).to have_http_status(:ok)
     end
+
+    it 'returns provider errors as a gateway error with actionable detail' do
+      grant_permissions('integrations.execute')
+      processor = instance_double(Integrations::Openai::GlobalProcessorService,
+                                  perform: { error: { 'error' => { 'message' => 'model does not support chat' } },
+                                             error_code: 400 })
+      allow(Integrations::Openai::GlobalProcessorService).to receive(:new).and_return(processor)
+
+      post '/api/v1/integrations/openai/process_event',
+           params: { event: { name: 'rephrase', data: { content: 'hi' } } }, as: :json
+
+      expect(response).to have_http_status(:bad_gateway)
+      expect(response.parsed_body['error']).to eq('model does not support chat')
+    end
   end
 end

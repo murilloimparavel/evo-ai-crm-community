@@ -103,10 +103,11 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
     end
 
     context 'openaiConfigured' do
-      it 'returns true when URL, key and model are all set' do
+      it 'returns true when an OpenAI-compatible endpoint, URL and model are set' do
         allow(GlobalConfigService).to receive(:load).with('OPENAI_API_URL', '').and_return('https://api.openai.com')
-        allow(GlobalConfigService).to receive(:load).with('OPENAI_API_SECRET', '').and_return('sk-test')
         allow(GlobalConfigService).to receive(:load).with('OPENAI_MODEL', '').and_return('gpt-4')
+        allow(Ai::CredentialResolver).to receive(:resolve_endpoint).with(for_consumer: :inbox_assist)
+          .and_return(Ai::CredentialResolver::Endpoint.new(key: 'sk-test', provider: 'openai'))
 
         get :show, format: :json
         json = JSON.parse(response.body)
@@ -115,12 +116,22 @@ RSpec.describe Api::V1::GlobalConfigController, type: :controller do
 
       it 'returns false when any OpenAI field is missing' do
         allow(GlobalConfigService).to receive(:load).with('OPENAI_API_URL', '').and_return('https://api.openai.com')
-        allow(GlobalConfigService).to receive(:load).with('OPENAI_API_SECRET', '').and_return('')
         allow(GlobalConfigService).to receive(:load).with('OPENAI_MODEL', '').and_return('gpt-4')
+        allow(Ai::CredentialResolver).to receive(:resolve_endpoint).with(for_consumer: :inbox_assist)
+          .and_return(Ai::CredentialResolver::Endpoint.new(key: nil, provider: 'openai'))
 
         get :show, format: :json
         json = JSON.parse(response.body)
         expect(json['openaiConfigured']).to be false
+      end
+
+      it 'returns true for OpenRouter without the OpenAI URL setting' do
+        allow(Ai::CredentialResolver).to receive(:resolve_endpoint).with(for_consumer: :inbox_assist)
+          .and_return(Ai::CredentialResolver::Endpoint.new(key: 'sk-or-test', provider: 'openrouter',
+                                                           base_url: 'https://openrouter.ai/api/v1'))
+
+        get :show, format: :json
+        expect(JSON.parse(response.body)['openaiConfigured']).to be true
       end
     end
 

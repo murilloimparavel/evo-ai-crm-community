@@ -17,10 +17,9 @@ RSpec.describe Ai::ConsumerCompatibility do
     expect(described_class.accepts?(:ai_agents, 'gemini')).to be(true)
   end
 
-  # These four build an OpenAI-shaped request (chat/completions, or Whisper for
-  # transcription). A non-OpenAI provider there is a different protocol, not a
-  # misconfiguration, so it must never reach the wire.
-  %i[inbox_assist label_suggestion moderation].each do |consumer|
+  # Label suggestions and moderation still use endpoints outside OpenRouter's
+  # inbox-assist capability.
+  %i[label_suggestion moderation].each do |consumer|
     it "restricts #{consumer} to OpenAI-compatible providers" do
       expect(described_class.accepts?(consumer, 'openai')).to be(true)
       expect(described_class.accepts?(consumer, 'azure')).to be(true)
@@ -32,13 +31,18 @@ RSpec.describe Ai::ConsumerCompatibility do
     end
   end
 
-  it 'allows Groq and OpenRouter credentials only for the transcription endpoint' do
-    %w[groq openrouter].each do |provider|
-      expect(described_class.accepts?(:audio_transcription, provider)).to be(true)
-      expect(described_class.accepts?(:inbox_assist, provider)).to be(false)
-      expect(described_class.accepts?(:label_suggestion, provider)).to be(false)
-      expect(described_class.accepts?(:moderation, provider)).to be(false)
-    end
+  it 'allows OpenRouter for inbox chat and audio transcription, not moderation' do
+    expect(described_class.accepts?(:inbox_assist, 'openrouter')).to be(true)
+    expect(described_class.accepts?(:audio_transcription, 'openrouter')).to be(true)
+    expect(described_class.accepts?(:label_suggestion, 'openrouter')).to be(false)
+    expect(described_class.accepts?(:moderation, 'openrouter')).to be(false)
+  end
+
+  it 'allows Groq for transcription but not inbox chat' do
+    expect(described_class.accepts?(:audio_transcription, 'groq')).to be(true)
+    expect(described_class.accepts?(:inbox_assist, 'groq')).to be(false)
+    expect(described_class.accepts?(:label_suggestion, 'groq')).to be(false)
+    expect(described_class.accepts?(:moderation, 'groq')).to be(false)
   end
 
   it 'rejects an unknown consumer instead of guessing' do

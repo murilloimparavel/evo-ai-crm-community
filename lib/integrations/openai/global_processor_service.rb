@@ -15,6 +15,7 @@ class Integrations::Openai::GlobalProcessorService
     return nil unless global_config_available?
 
     result = send("#{event_name}_message")
+    return result if result.is_a?(Hash) && result[:error].present?
 
     # For analyze_sentiment, wrap result in message format for consistency
     if event_name == 'analyze_sentiment' && result.is_a?(Hash)
@@ -51,11 +52,21 @@ class Integrations::Openai::GlobalProcessorService
   end
 
   def credential_endpoint
-    @credential_endpoint ||= Ai::CredentialResolver.resolve_endpoint(for_consumer: :inbox_assist)
+    @credential_endpoint ||= Ai::CredentialResolver.resolve_endpoint(for_consumer: credential_consumer)
+  end
+
+  # Sentiment analysis is used by moderation, which OpenRouter is not approved
+  # for. Keep it on the moderation credential path.
+  def credential_consumer
+    event_name == 'analyze_sentiment' ? :moderation : :inbox_assist
   end
 
   def gpt_model
-    @gpt_model ||= GlobalConfigService.load('OPENAI_MODEL', 'gpt-4.1-nano')
+    @gpt_model ||= Ai::ModelResolver.resolve(
+      GlobalConfigService.load('OPENAI_MODEL', 'gpt-4.1-nano'),
+      provider: credential_endpoint.provider,
+      openrouter_model: GlobalConfigService.load('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL)
+    )
   end
 
   def conversation
@@ -131,17 +142,19 @@ class Integrations::Openai::GlobalProcessorService
       'Authorization' => "Bearer #{api_key}"
     }
 
-    Rails.logger.info("OpenAI Global API request to #{full_api_url}: #{body}")
+    provider = credential_endpoint.provider.presence || 'legacy'
+    Rails.logger.info("OpenAI Global API request provider=#{provider} model=#{gpt_model}")
     response = HTTParty.post(full_api_url, headers: headers, body: body)
-    Rails.logger.info("OpenAI Global API response: #{response.body}")
+    Rails.logger.info("OpenAI Global API response provider=#{provider} status=#{response.code}")
 
     return { error: response.parsed_response, error_code: response.code } unless response.success?
 
     choices = JSON.parse(response.body)['choices']
+    content = choices.first&.dig('message', 'content') if choices.present?
 
-    return { message: choices.first['message']['content'] } if choices.present?
+    return { message: content } if content.present?
 
-    { message: nil }
+    { error: { message: 'O provedor de IA retornou uma resposta vazia.' }, error_code: response.code }
   end
 
   def rephrase_message
@@ -188,6 +201,7 @@ class Integrations::Openai::GlobalProcessorService
     # Public method to analyze sentiment of a comment
     # Can be called directly without event structure
     result = make_api_call(build_api_call_body(get_prompt('analyze_sentiment'), event['data']['content']))
+    return result if result.is_a?(Hash) && result[:error].present?
 
     # Parse JSON response from OpenAI
     if result[:message].present?

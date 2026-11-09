@@ -86,12 +86,20 @@ class Integrations::OpenaiBaseService
   # Endpoint from the same credential as the key; installation setting is the
   # fallback for credentials that carry no URL of their own.
   def api_url
-    @api_url ||= "#{credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', 'https://api.openai.com/v1')}/chat/completions"
+    @api_url ||= begin
+      base_url = credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', 'https://api.openai.com/v1')
+      base_url = base_url.chomp('/')
+      base_url.end_with?('/chat/completions') ? base_url : "#{base_url}/chat/completions"
+    end
   end
 
   # Get OpenAI model from global configuration
   def gpt_model
-    @gpt_model ||= GlobalConfigService.load('OPENAI_MODEL', 'gpt-4.1-nano')
+    @gpt_model ||= Ai::ModelResolver.resolve(
+      GlobalConfigService.load('OPENAI_MODEL', 'gpt-4.1-nano'),
+      provider: credential_endpoint.provider,
+      openrouter_model: GlobalConfigService.load('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL)
+    )
   end
 
   # Get API key from global configuration or hook settings (fallback)
@@ -162,9 +170,10 @@ class Integrations::OpenaiBaseService
       'Authorization' => "Bearer #{current_api_key}"
     }
 
-    Rails.logger.info("OpenAI API request to #{api_url}: #{body}")
+    provider = credential_endpoint.provider.presence || 'legacy'
+    Rails.logger.info("OpenAI API request provider=#{provider} model=#{gpt_model}")
     response = HTTParty.post(api_url, headers: headers, body: body)
-    Rails.logger.info("OpenAI API response: #{response.body}")
+    Rails.logger.info("OpenAI API response provider=#{provider} status=#{response.code}")
 
     return { error: response.parsed_response, error_code: response.code } unless response.success?
 

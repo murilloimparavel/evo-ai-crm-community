@@ -60,11 +60,18 @@ class Api::V1::GlobalConfigController < Api::BaseController
   # install and hide AI features that actually work. URL and model stay here:
   # they are consumer config, not credential.
   def openai_configured?
-    api_url = GlobalConfigService.load('OPENAI_API_URL', '').to_s.strip
-    model = GlobalConfigService.load('OPENAI_MODEL', '').to_s.strip
+    endpoint = Ai::CredentialResolver.resolve_endpoint(for_consumer: :inbox_assist)
+    return false unless endpoint&.key.present?
 
-    api_url.present? && model.present? &&
-      Ai::CredentialResolver.resolve_key(for_consumer: :inbox_assist).present?
+    if endpoint.provider == 'openrouter'
+      model = GlobalConfigService.load('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL).to_s.strip
+      model = Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL if model.blank?
+      model.present?
+    else
+      api_url = endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', '').to_s.strip
+      model = GlobalConfigService.load('OPENAI_MODEL', '').to_s.strip
+      api_url.present? && model.present?
+    end
   end
 
   # Evolution Hub is "active" when both the toggle is on AND the required

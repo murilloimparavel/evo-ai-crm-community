@@ -61,7 +61,7 @@ class Api::V1::GlobalConfigController < Api::BaseController
   # they are consumer config, not credential.
   def openai_configured?
     endpoint = Ai::CredentialResolver.resolve_endpoint(for_consumer: :inbox_assist)
-    return false unless endpoint&.key.present?
+    return false unless endpoint&.key
 
     return true if endpoint.provider == 'openrouter'
 

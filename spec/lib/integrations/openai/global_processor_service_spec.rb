@@ -5,13 +5,17 @@ require 'rails_helper'
 RSpec.describe Integrations::Openai::GlobalProcessorService do
   it 'uses the inbox-assist credential for chat events' do
     service = described_class.new(account: nil, event: { 'name' => 'rephrase' })
-    endpoint = Ai::CredentialResolver::Endpoint.new(key: 'key', base_url: 'https://openrouter.ai/api/v1',
-                                                     provider: 'openrouter')
+    endpoint = Ai::CredentialResolver::Endpoint.new(
+      key: 'key',
+      base_url: 'https://openrouter.ai/api/v1',
+      provider: 'openrouter'
+    )
     expect(Ai::CredentialResolver).to receive(:resolve_endpoint)
       .with(for_consumer: :inbox_assist).and_return(endpoint)
 
     expect(service.send(:credential_endpoint)).to eq(endpoint)
     expect(service.send(:api_url)).to eq('https://openrouter.ai/api/v1')
+    allow(GlobalConfigService).to receive(:load).and_call_original
     allow(GlobalConfigService).to receive(:load)
       .with('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL)
       .and_return('anthropic/claude-sonnet')
@@ -52,8 +56,11 @@ RSpec.describe Integrations::Openai::GlobalProcessorService do
 
   it 'sends chat completions to OpenRouter and returns the generated message' do
     service = described_class.new(account: nil, event: { 'name' => 'rephrase' })
-    endpoint = Ai::CredentialResolver::Endpoint.new(key: 'key', base_url: 'https://openrouter.ai/api/v1',
-                                                     provider: 'openrouter')
+    endpoint = Ai::CredentialResolver::Endpoint.new(
+      key: 'key',
+      base_url: 'https://openrouter.ai/api/v1',
+      provider: 'openrouter'
+    )
     allow(Ai::CredentialResolver).to receive(:resolve_endpoint).and_return(endpoint)
     allow(service).to receive(:gpt_model).and_return('anthropic/claude-sonnet')
     response = instance_double(HTTParty::Response, code: 200, success?: true,

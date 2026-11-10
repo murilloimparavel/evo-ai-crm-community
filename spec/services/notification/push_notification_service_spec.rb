@@ -53,32 +53,37 @@ RSpec.describe Notification::PushNotificationService do
   describe 'user preferences' do
     let(:user) { User.new(email: 'agent@example.com') }
     let(:setting) { NotificationSetting.new }
-    let(:subscription) { instance_double(NotificationSubscription, id: 'one', subscription_type: 'browser_push') }
+    let(:subscription) do
+      instance_double(NotificationSubscription, id: 'one', subscription_type: 'browser_push', browser_push?: true,
+                                                valid?: true, fcm?: false,
+                                                subscription_attributes: { 'endpoint' => 'https://fcm.googleapis.com/test',
+                                                                           'p256dh' => 'public-key', 'auth' => 'auth-key' })
+    end
 
     before do
       allow(notification).to receive(:user).and_return(user)
       allow(user).to receive_messages(notification_settings: [setting], notification_subscriptions: [subscription])
-      allow(service).to receive(:send_browser_push)
-      allow(service).to receive(:send_fcm_push)
-      allow(service).to receive(:send_push_via_evolution_hub)
+      allow(VapidService).to receive_messages(public_key: 'public', private_key: 'private', subject: 'https://crm.example')
+      allow(GlobalConfigService).to receive(:load).and_return(nil)
+      allow(WebPush).to receive(:payload_send)
     end
 
     it 'sends to the user subscriptions when the message preference is enabled' do
       allow(setting).to receive(:push_assigned_conversation_new_message?).and_return(true)
       service.perform
-      expect(service).to have_received(:send_browser_push).with(subscription)
+      expect(WebPush).to have_received(:payload_send)
     end
 
     it 'does not send when the message preference is disabled' do
       allow(setting).to receive(:push_assigned_conversation_new_message?).and_return(false)
       service.perform
-      expect(service).not_to have_received(:send_browser_push)
+      expect(WebPush).not_to have_received(:payload_send)
     end
 
     it 'does not send when the user has no notification settings' do
       allow(user).to receive(:notification_settings).and_return([])
       service.perform
-      expect(service).not_to have_received(:send_browser_push)
+      expect(WebPush).not_to have_received(:payload_send)
     end
   end
 

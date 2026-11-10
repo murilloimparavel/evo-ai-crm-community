@@ -21,6 +21,9 @@ class Ai::Credential < ActiveRecord::Base
   # Providers speaking the OpenAI wire protocol; the others only serve AI Agents.
   # Mirrors IsOpenAICompatible in the core's api_key model.
   OPENAI_COMPATIBLE_PROVIDERS = %w[openai azure custom custom_openai_compatible].freeze
+  # OpenRouter exposes chat completions for inbox assistance, but not every CRM
+  # endpoint that uses the broader OpenAI-compatible provider set.
+  INBOX_ASSIST_COMPATIBLE_PROVIDERS = (OPENAI_COMPATIBLE_PROVIDERS + %w[openrouter]).freeze
 
   scope :active, -> { where(is_active: true) }
   scope :for_scope, ->(scope) { where(scope: scope) }

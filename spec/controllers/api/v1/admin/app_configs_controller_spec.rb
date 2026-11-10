@@ -310,6 +310,16 @@ RSpec.describe Api::V1::Admin::AppConfigsController, type: :controller do
           expect(InstallationConfig.find_by(name: 'AUDIO_TRANSCRIPTION_MAX_DURATION_SECONDS')).to be_nil
         end
 
+        it 'persists the OpenRouter inbox-assist model' do
+          post :create, params: {
+            config_type: 'openai',
+            app_config: { OPENROUTER_MODEL: 'anthropic/claude-sonnet' }
+          }, format: :json
+
+          expect(response).to have_http_status(:ok)
+          expect(InstallationConfig.find_by(name: 'OPENROUTER_MODEL').value).to eq('anthropic/claude-sonnet')
+        end
+
         it 'ignores keys not in the allowed list' do
           post :create, params: {
             config_type: 'smtp',

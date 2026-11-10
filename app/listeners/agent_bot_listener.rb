@@ -25,6 +25,13 @@ class AgentBotListener < BaseListener
 
   def message_created(event)
     message = extract_message_and_account(event)[0]
+    if BotRuntime::Config.enabled? && !event.data[:runtime_journal_replay]
+      journal = BotRuntime::MessageEvent.find_by(message_id: message.id)
+      if journal
+        BotRuntime::ProcessMessageEventJob.perform_later(journal.id)
+        return
+      end
+    end
     inbox = message.inbox
     return unless connected_agent_bot_exist?(inbox)
     return unless message.webhook_sendable?
@@ -537,6 +544,7 @@ class AgentBotListener < BaseListener
   rescue StandardError => e
     Rails.logger.error "[BotRuntime] Delegation failed: #{e.message}"
     Rails.logger.error "[BotRuntime] Backtrace: #{e.backtrace.first(5).join("\n")}"
+    raise
   end
 
   def incoming_message_event?(payload)

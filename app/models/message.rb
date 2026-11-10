@@ -136,6 +136,7 @@ class Message < ApplicationRecord
   has_one :csat_survey_response, dependent: :destroy_async
   has_many :notifications, as: :primary_actor, dependent: :destroy_async
 
+  after_create :journal_bot_runtime_event, unless: :imported?
   after_create_commit :execute_after_create_commit_callbacks, unless: :imported?
   after_create_commit :publish_message_created, unless: :imported?
   after_create_commit :sync_message_event, unless: :imported?
@@ -336,6 +337,16 @@ class Message < ApplicationRecord
 
   def ensure_content_type
     self.content_type ||= Message.content_types[:text]
+  end
+
+  # Capture within the message transaction; eligibility remains in the listener.
+  def journal_bot_runtime_event
+    return unless incoming? && BotRuntime::Config.enabled? && inbox&.active_bot?
+    # Moderation has external effects and needs its own idempotent event journal;
+    # retain its existing listener path rather than replaying those effects.
+    return if inbox.agent_bot_inbox&.moderation_enabled?
+
+    BotRuntime::MessageEvent.create!(message_id: id)
   end
 
   def execute_after_create_commit_callbacks

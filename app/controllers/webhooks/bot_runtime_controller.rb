@@ -38,8 +38,8 @@ class Webhooks::BotRuntimeController < ActionController::API
       content_attributes = { items: items }
     end
 
-    message = AgentBots::MessageCreator.new(agent_bot).create_bot_reply(
-      content, conversation,
+    message = create_runtime_reply(
+      agent_bot, conversation, content,
       # Bot Runtime may request this bypass only for the single terminal
       # handoff postback marked by a successful processor transfer result.
       # Regular bot replies continue through status and ignored-label checks.
@@ -59,6 +59,25 @@ class Webhooks::BotRuntimeController < ActionController::API
   end
 
   private
+
+  # Serialize duplicate postbacks with message creation in the same transaction.
+  # Old runtimes remain compatible when no delivery ID is supplied.
+  def create_runtime_reply(agent_bot, conversation, content, **options)
+    delivery_id = params[:runtime_delivery_id].to_s
+    return AgentBots::MessageCreator.new(agent_bot).create_bot_reply(content, conversation, **options) if delivery_id.blank?
+    raise ActionController::BadRequest, 'Invalid runtime delivery ID' if delivery_id.bytesize > 200
+
+    conversation.with_lock do
+      existing = conversation.messages.where(sender: agent_bot)
+                             .where("content_attributes ->> 'runtime_delivery_id' = ?", delivery_id).first
+      next existing if existing
+
+      attributes = (options[:content_attributes] || {}).merge(runtime_delivery_id: delivery_id)
+      AgentBots::MessageCreator.new(agent_bot).create_bot_reply(
+        content, conversation, **options.merge(content_attributes: attributes)
+      )
+    end
+  end
 
   VALID_MEDIA_FILE_TYPES = %w[image audio video file].freeze
 

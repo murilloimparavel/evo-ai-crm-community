@@ -5,8 +5,10 @@ RSpec.describe Notification::PushNotificationService do
 
   let(:conversation) { instance_double(Conversation, display_id: 123) }
   let(:notification) do
-    instance_double(Notification, conversation: conversation, push_message_title: 'Conversa #123', push_message_body: 'Ana: Olá',
-           notification_type: 'assigned_conversation_new_message', id: 'notification-id')
+    instance_double(
+      Notification, conversation: conversation, push_message_title: 'Conversa #123', push_message_body: 'Ana: Olá',
+                    notification_type: 'assigned_conversation_new_message', id: 'notification-id'
+    )
   end
 
   it 'includes the sender and preview and links to the Sofia conversation' do

@@ -31,8 +31,9 @@ RSpec.describe 'Notification subscriptions', type: :request do
   end
 
   it 'does not delete another user’s subscription' do
-    subscription = other_user.notification_subscriptions.create!(subscription_type: :browser_push, identifier: endpoint,
-                                                                subscription_attributes: attributes)
+    subscription = other_user.notification_subscriptions.create!(
+      subscription_type: :browser_push, identifier: endpoint, subscription_attributes: attributes
+    )
     delete '/api/v1/notification_subscriptions', params: { endpoint: endpoint }, as: :json
     expect(response).to have_http_status(:ok)
     expect(NotificationSubscription.exists?(subscription.id)).to be(true)

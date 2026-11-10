@@ -22,8 +22,8 @@ class NotificationSubscription < ApplicationRecord
 
   # Only browser-vendor push services are allowed. The endpoint is otherwise a
   # user-provided URL fetched by the server and can be abused for SSRF.
-  BROWSER_PUSH_HOSTS = %r{\A(?:fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|\
-(?:[a-z0-9-]+\.)*push\.apple\.com|(?:[a-z0-9-]+\.)*notify\.windows\.com)\z}ix.freeze
+  BROWSER_PUSH_HOSTS = /\A(?:fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|\
+(?:[a-z0-9-]+\.)*push\.apple\.com|(?:[a-z0-9-]+\.)*notify\.windows\.com)\z/ix
 
   def validate_browser_subscription
     attrs = subscription_attributes || {}

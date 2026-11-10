@@ -1,12 +1,13 @@
 require 'rails_helper'
 
 RSpec.describe Notification::PushNotificationService do
-  let(:conversation) { double(display_id: 123) }
+  subject(:service) { described_class.new(notification: notification) }
+
+  let(:conversation) { instance_double(Conversation, display_id: 123) }
   let(:notification) do
-    double(conversation: conversation, push_message_title: 'Conversa #123', push_message_body: 'Ana: Olá',
+    instance_double(Notification, conversation: conversation, push_message_title: 'Conversa #123', push_message_body: 'Ana: Olá',
            notification_type: 'assigned_conversation_new_message', id: 'notification-id')
   end
-  subject(:service) { described_class.new(notification: notification) }
 
   it 'includes the sender and preview and links to the Sofia conversation' do
     payload = service.send(:push_message)
@@ -18,8 +19,8 @@ RSpec.describe Notification::PushNotificationService do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with('VAPID_SUBJECT').and_return('')
     allow(ENV).to receive(:[]).with('FRONTEND_URL').and_return('')
-    expect { service.send(:vapid_subject) }.to raise_error(ArgumentError, /VAPID_SUBJECT/)
+    expect { VapidService.subject }.to raise_error(ArgumentError, /VAPID_SUBJECT/)
     allow(ENV).to receive(:[]).with('FRONTEND_URL').and_return('https://crm.example')
-    expect(service.send(:vapid_subject)).to eq('https://crm.example')
+    expect(VapidService.subject).to eq('https://crm.example')
   end
 end

@@ -7,6 +7,16 @@ class VapidService
     vapid_keys['private_key']
   end
 
+  def self.subject
+    subject = ENV['VAPID_SUBJECT'].presence || ENV['FRONTEND_URL'].presence
+    uri = URI.parse(subject.to_s)
+    return subject if uri.is_a?(URI::MailTo) || (uri.is_a?(URI::HTTPS) && uri.host.present?)
+
+    raise ArgumentError, 'VAPID_SUBJECT or FRONTEND_URL must be a mailto or HTTPS URL'
+  rescue URI::InvalidURIError
+    raise ArgumentError, 'VAPID_SUBJECT or FRONTEND_URL must be a mailto or HTTPS URL'
+  end
+
   def self.vapid_keys
     config = GlobalConfig.get('VAPID_KEYS')
     return config['VAPID_KEYS'] if config['VAPID_KEYS'].present?

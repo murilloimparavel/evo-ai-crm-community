@@ -1,9 +1,13 @@
 require 'rails_helper'
 
 RSpec.describe NotificationSubscription, type: :model do
+  subject(:subscription) do
+    described_class.new(user: user, subscription_type: :browser_push, identifier: attributes['endpoint'],
+                        subscription_attributes: attributes)
+  end
+
   let(:user) { User.create!(name: 'Push User', email: "push-#{SecureRandom.hex(4)}@example.com") }
   let(:attributes) { { 'endpoint' => 'https://fcm.googleapis.com/fcm/send/example', 'p256dh' => 'a' * 87, 'auth' => 'b' * 22 } }
-  subject(:subscription) { described_class.new(user: user, subscription_type: :browser_push, identifier: attributes['endpoint'], subscription_attributes: attributes) }
 
   it 'accepts a browser push service endpoint' do
     expect(subscription).to be_valid

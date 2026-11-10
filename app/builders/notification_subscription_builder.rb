@@ -2,9 +2,7 @@ class NotificationSubscriptionBuilder
   pattr_initialize [:params, :user!]
 
   def perform
-    result = identifier_subscription.blank? ? build_identifier_subscription : update_identifier_subscription
-
-    result
+    identifier_subscription.blank? ? build_identifier_subscription : update_identifier_subscription
   end
 
   private

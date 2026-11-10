@@ -51,16 +51,6 @@ class Notification::PushNotificationService
     "/conversations/#{conversation.display_id}"
   end
 
-  def vapid_subject
-    subject = ENV['VAPID_SUBJECT'].presence || ENV['FRONTEND_URL'].presence
-    uri = URI.parse(subject.to_s)
-    return subject if uri.is_a?(URI::MailTo) || (uri.is_a?(URI::HTTPS) && uri.host.present?)
-
-    raise ArgumentError, 'VAPID_SUBJECT or FRONTEND_URL must be a mailto or HTTPS URL'
-  rescue URI::InvalidURIError
-    raise ArgumentError, 'VAPID_SUBJECT or FRONTEND_URL must be a mailto or HTTPS URL'
-  end
-
   def can_send_browser_push?(subscription)
     subscription.browser_push? && subscription.valid? && VapidService.public_key.present?
   end
@@ -72,7 +62,7 @@ class Notification::PushNotificationService
       p256dh: subscription.subscription_attributes['p256dh'],
       auth: subscription.subscription_attributes['auth'],
       vapid: {
-        subject: vapid_subject,
+        subject: VapidService.subject,
         public_key: VapidService.public_key,
         private_key: VapidService.private_key
       },

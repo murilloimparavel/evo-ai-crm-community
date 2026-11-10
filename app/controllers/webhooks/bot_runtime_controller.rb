@@ -21,6 +21,23 @@ class Webhooks::BotRuntimeController < ActionController::API
 
   private
 
+  # This callback stays inside ResponseProvenance.record!: verify the signed
+  # provenance before looking up a previously delivered runtime response.
+  def create_runtime_reply(bot, conversation, content, **options)
+    delivery_id = params[:runtime_delivery_id].to_s
+    return AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, **options) if delivery_id.blank?
+    raise ActionController::BadRequest, 'Invalid runtime delivery ID' if delivery_id.bytesize > 200
+
+    conversation.with_lock do
+      existing = conversation.messages.where(sender: bot)
+                             .where("content_attributes ->> 'runtime_delivery_id' = ?", delivery_id).first
+      next existing if existing
+
+      attributes = (options[:content_attributes] || {}).merge(runtime_delivery_id: delivery_id)
+      AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, **options.merge(content_attributes: attributes))
+    end
+  end
+
   def normalized_content
     content = params[:content].to_s
     media = resolve_media(content)
@@ -31,7 +48,7 @@ class Webhooks::BotRuntimeController < ActionController::API
   def postback_message(conversation, bot, content, media)
     content_type = params[:content_type].presence || 'text'
     create_reply = lambda do
-      AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, force: params[:force] == true,
+      create_runtime_reply(bot, conversation, content, force: params[:force] == true,
                                                                                  content_type: content_type,
                                                                                  content_attributes: select_attributes(content_type), media: media)
     end

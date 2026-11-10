@@ -118,3 +118,9 @@ whatsapp_credential_probe_scheduler_job:
   class: 'Channels::Whatsapp::CredentialProbeSchedulerJob'
   queue: low
   description: 'Re-probe token-based whatsapp credentials and refresh the verified stamp'
+
+# Database-backed delivery recovery after worker/runtime outages or failed enqueue.
+bot_runtime_replay_pending_deliveries_job:
+  cron: '* * * * *'
+  class: 'BotRuntime::ReplayPendingDeliveriesJob'
+  queue: scheduled_jobs

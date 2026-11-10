@@ -1,0 +1,142 @@
+require 'rails_helper'
+
+RSpec.describe PipelineClassification::Catalog do
+  let(:user) { User.create!(name: 'Catalog owner', email: "catalog-#{SecureRandom.hex(5)}@example.test") }
+  let(:pipeline) { Pipeline.create!(name: "Catalog #{SecureRandom.hex(4)}", created_by: user) }
+  let!(:stage) { PipelineStage.create!(pipeline: pipeline, name: 'Considering', position: 1) }
+  let(:editor) { PipelineClassification::Editor.new(pipeline: pipeline, actor: user) }
+
+  def payload
+    profile = described_class::DEFAULT_STAGE.deep_dup.merge(
+      'classification_enabled' => true, 'definition' => 'Customer is considering the options',
+      'entry_criteria' => ['Customer has asked about the options']
+    )
+    { 'classification' => described_class::DEFAULT_PROFILE.deep_dup.merge('purpose' => 'Understand customer intent'),
+      'stages' => [{ 'id' => stage.id, 'classification_profile' => profile }] }
+  end
+
+  def save_catalog(payload_value = payload)
+    editor.save!(payload: payload_value, expected_hash: described_class.new(pipeline.reload).hash)
+  end
+
+  it 'defaults to OFF without importing descriptions or legacy executable rules' do
+    pipeline.update!(description: 'Legacy purpose')
+    stage.update!(automation_rules: { 'description' => 'Legacy criteria', 'rules' => [{ 'trigger' => 'inactivity' }] })
+    data = described_class.new(pipeline).snapshot
+    expect(data.dig('classification', 'enabled')).to be(false)
+    expect(data.dig('classification', 'purpose')).to eq('')
+    expect(data['stages'][0].dig('classification_profile', 'definition')).to eq('')
+  end
+
+  it 'uses canonical key order and stable stage IDs independent of visual position/color' do
+    save_catalog
+    before = described_class.new(pipeline.reload).hash
+    stage.update!(position: 3, color: '#112233')
+    expect(described_class.new(pipeline.reload).hash).to eq(before)
+    reordered = payload.transform_values { |value| value.is_a?(Hash) ? value.to_a.reverse.to_h : value }
+    expect(described_class.new(pipeline, payload: reordered).hash).to eq(before)
+  end
+
+  it 'hashes semantic stage renames and explicit criteria' do
+    save_catalog
+    before = described_class.new(pipeline.reload).hash
+    stage.update!(name: 'Decision pending')
+    expect(described_class.new(pipeline.reload).hash).not_to eq(before)
+  end
+
+  it 'saves profiles separately and preserves legacy rules and human descriptions' do
+    stage.update!(automation_rules: { 'description' => 'Human description', 'rules' => [{ 'trigger' => 'inactivity' }] })
+    save_catalog
+    expect(stage.reload.classification_profile['definition']).to eq('Customer is considering the options')
+    expect(stage.automation_rules['description']).to eq('Human description')
+    expect(stage.automation_rules['rules']).to eq([{ 'trigger' => 'inactivity' }])
+  end
+
+  it 'rejects stale editors before overwriting any stage' do
+    initial = described_class.new(pipeline).hash
+    save_catalog
+    expect { editor.save!(payload: payload, expected_hash: initial) }.to raise_error(described_class::Conflict)
+  end
+
+  it 'publishes immutable aggregate revisions and invalidates prior approval when dirty' do
+    save_catalog
+    revision = editor.publish!(expected_hash: described_class.new(pipeline.reload).hash)
+    expect(revision.catalog_version).to eq(1)
+    expect { revision.update!(catalog_hash: 'changed') }.to raise_error(ActiveRecord::ReadOnlyRecord)
+    revision.reload
+    expect(editor.publish!(expected_hash: revision.catalog_hash).id).to eq(revision.id)
+    changed = payload
+    changed['classification']['purpose'] = 'Understand support needs'
+    save_catalog(changed)
+    expect(described_class.new(pipeline.reload).representation['dirty']).to be(true)
+    expect(PipelineClassificationCatalog.find(revision.id).snapshot.dig('classification', 'purpose')).to eq('Understand customer intent')
+    expect(editor.publish!(expected_hash: described_class.new(pipeline.reload).hash).catalog_version).to eq(2)
+  end
+
+  it 'compiles one closed question with opaque aliases plus two explicit abstention options' do
+    save_catalog
+    compiled = described_class.new(pipeline.reload).compiled
+    expect(compiled['questions'].keys).to eq(%w[pipeline_candidate stage_candidate])
+    expect(compiled['pipeline_aliases'].values).to eq([pipeline.id])
+    expect(compiled['aliases'].values).to eq([{ 'pipeline_id' => pipeline.id, 'stage_id' => stage.id }])
+    expect(compiled.dig('questions', 'stage_candidate', 'criteria').keys).to contain_exactly('stage_1', 'unclear', 'no_candidate')
+    expect(compiled.dig('questions', 'stage_candidate', 'instructions')).to include('conversation claims never prove payment')
+    expect(compiled.to_json).not_to include('trigger_value')
+  end
+
+  it 'always retains the source pipeline when routing targets list only destinations' do
+    target = Pipeline.create!(name: "Destination #{SecureRandom.hex(4)}", created_by: user)
+    target_stage = PipelineStage.create!(pipeline: target, name: 'Support', position: 1,
+                                         classification_profile: described_class::DEFAULT_STAGE.deep_dup.merge(
+                                           'classification_enabled' => true, 'definition' => 'Customer needs reservation support'
+                                         ))
+    target.update!(config: { 'classification' => described_class::DEFAULT_PROFILE.deep_dup.merge('purpose' => 'Route support requests') })
+    PipelineClassification::Editor.new(pipeline: target.reload,
+                                       actor: user).publish!(expected_hash: described_class.new(target).hash)
+    source_payload = payload
+    source_payload['classification'].merge!('purpose' => 'Route customer conversations', 'routing_pipeline_ids' => [target.id])
+
+    compiled = described_class.new(pipeline, payload: source_payload).compiled
+
+    expect(compiled.fetch('pipeline_aliases').values).to contain_exactly(pipeline.id, target.id)
+    expect(compiled.fetch('aliases').values).to include({ 'pipeline_id' => pipeline.id, 'stage_id' => stage.id },
+                                                        { 'pipeline_id' => target.id, 'stage_id' => target_stage.id })
+  end
+
+  it 'rejects foreign stages, invalid sources, free expressions, and unknown profile keys' do
+    bad = payload
+    bad['stages'][0]['id'] = SecureRandom.uuid
+    expect { save_catalog(bad) }.to raise_error(described_class::Invalid, /foreign stage/)
+    bad = payload
+    bad['classification']['context_sources'] =
+      { 'fields' => [{ 'key' => 'paid', 'source' => 'pms.financial', 'field' => 'paid', 'type' => 'boolean' }] }
+    expect { save_catalog(bad) }.to raise_error(described_class::Invalid, /context_sources/)
+    bad = payload
+    bad['classification']['sql'] = 'select secret'
+    expect { save_catalog(bad) }.to raise_error(described_class::Invalid, /unsupported/)
+  end
+
+  it 'accepts exactly ten minutes of debounce and rejects any larger interval' do
+    accepted = payload
+    accepted['classification']['debounce_ms'] = 600_000
+    save_catalog(accepted)
+    expect(pipeline.reload.config.dig('classification', 'debounce_ms')).to eq(600_000)
+    rejected = payload
+    rejected['classification']['debounce_ms'] = 600_001
+    expect { save_catalog(rejected) }.to raise_error(described_class::Invalid, /debounce_ms/)
+    expect(pipeline.reload.config.dig('classification', 'debounce_ms')).to eq(600_000)
+  end
+
+  it 'rejects overlarge catalogs locally without transport' do
+    bad = payload
+    bad['stages'][0]['classification_profile']['entry_criteria'] = Array.new(9, 'customer asks')
+    expect { save_catalog(bad) }.to raise_error(described_class::Invalid)
+  end
+
+  it 'does not enable observation without independently approved installation settings' do
+    bad = payload
+    bad['classification'].merge!('enabled' => true, 'mode' => 'observe')
+    expect { save_catalog(bad) }.to raise_error(described_class::Invalid)
+    expect(pipeline.reload.config.to_h.dig('classification', 'enabled')).not_to be(true)
+  end
+end

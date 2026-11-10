@@ -131,7 +131,7 @@ class AgentBots::ResponseProcessor
     return false unless metadata.present?
 
     source_id = metadata[:source_incoming_message_id] || metadata['source_incoming_message_id']
-    latest_incoming = conversation.messages.incoming.order(created_at: :desc).first
+    latest_incoming = conversation.messages.incoming.reorder(created_at: :desc, id: :desc).first
     return true if source_id.blank? || latest_incoming&.id.to_s != source_id.to_s
     return true if !urgent_followup? && conversation.custom_attributes&.dig('urgent_followup') == true
     return true if conversation.assignee_id.present? && !urgent_followup?

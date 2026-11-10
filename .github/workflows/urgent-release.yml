@@ -1,0 +1,265 @@
+name: Urgent production candidate
+
+on:
+  push:
+    branches: [codex/urgent-release-20261104]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: urgent-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RAILS_ENV: test
+  ENCRYPTION_KEY: test-encryption-key-for-fernet!!
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_USERNAME: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DATABASE: evolution_test
+
+jobs:
+  ruby-quality:
+    name: Ruby lint and security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Run RuboCop
+        env:
+          EVENT_NAME: pull_request
+          BASE_SHA: 310ec304174dd916eea99b996e8721bea34abe4a
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == pull_request && -n "$BASE_SHA" ]]; then
+            mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- '*.rb')
+            if ((${#ruby_files[@]} == 0)); then
+              echo "No Ruby files changed; skipping RuboCop for this pull request."
+              exit 0
+            fi
+            baseline_dir="$RUNNER_TEMP/rubocop-base-$GITHUB_RUN_ID"
+            git worktree add --detach "$baseline_dir" "$BASE_SHA"
+            mapfile -t base_files < <(printf '%s\n' "${ruby_files[@]}" | while read -r file; do
+              test -f "$baseline_dir/$file" && printf '%s\n' "$baseline_dir/$file"
+            done)
+            if ((${#base_files[@]} > 0)); then
+              bundle exec rubocop --force-exclusion --config "$baseline_dir/.rubocop.yml" --format json \
+                --out "$RUNNER_TEMP/rubocop-base.json" "${base_files[@]}" || true
+            else
+              printf '{"files":[]}' > "$RUNNER_TEMP/rubocop-base.json"
+            fi
+            bundle exec rubocop --force-exclusion --format json \
+              --out "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}" || true
+            ruby .github/scripts/compare_rubocop_results.rb \
+              "$RUNNER_TEMP/rubocop-base.json" "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}"
+            git worktree remove --force "$baseline_dir"
+          elif [[ "$EVENT_NAME" == push && -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.rb')
+            if ((${#ruby_files[@]} == 0)); then
+              echo "No Ruby files changed in this push; skipping RuboCop."
+              exit 0
+            fi
+            bundle exec rubocop --format progress "${ruby_files[@]}"
+          else
+            bundle exec rubocop --format progress
+          fi
+
+      - name: Install pinned Brakeman
+        run: gem install brakeman --version 8.1.0 --no-document
+
+      - name: Run Brakeman
+        env:
+          EVENT_NAME: pull_request
+          BASE_SHA: 310ec304174dd916eea99b996e8721bea34abe4a
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/brakeman"
+          if [[ "$EVENT_NAME" == pull_request && -n "$BASE_SHA" ]]; then
+            baseline_dir="$RUNNER_TEMP/brakeman/base"
+            baseline_report="$RUNNER_TEMP/brakeman/base.json"
+            head_report="$RUNNER_TEMP/brakeman/head-vs-base.json"
+            mkdir -p "$baseline_dir"
+            git archive "$BASE_SHA" | tar -x -C "$baseline_dir"
+            brakeman _8.1.0_ --no-pager --quiet --no-exit-on-warn --no-exit-on-error \
+              --format json --output "$baseline_report" --path "$baseline_dir"
+            brakeman _8.1.0_ --no-pager --quiet --exit-on-warn --compare "$baseline_report" \
+              --format json --output "$head_report"
+          else
+            brakeman _8.1.0_ --no-pager --quiet --no-exit-on-warn \
+              --format json --output "$RUNNER_TEMP/brakeman/report.json"
+          fi
+
+      - name: Upload Brakeman report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: brakeman-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/brakeman/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  rspec:
+    name: Rails regression specs (base comparison)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BASE_SHA: 310ec304174dd916eea99b996e8721bea34abe4a
+      HEAD_SHA: ${{ github.sha }}
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: evolution_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+
+      - name: Run multi-message urgent regressions first
+        run: |
+          set -euo pipefail
+          bundle exec rails db:create
+          bundle exec rails db:schema:load
+          bundle exec rspec spec/services/conversations/urgent_unanswered_service_ordering_spec.rb \
+            --format progress --format RspecJunitFormatter --out "$RUNNER_TEMP/rspec-urgent-order-targeted.xml"
+
+      - name: Run full RSpec suite against base and PR head
+        run: |
+          set -euo pipefail
+          baseline_dir="$RUNNER_TEMP/crm-rspec-base"
+          base_report="$RUNNER_TEMP/rspec-base.xml"
+          head_report="$RUNNER_TEMP/rspec-head.xml"
+          export BUNDLE_GEMFILE="$GITHUB_WORKSPACE/Gemfile"
+          export BUNDLE_PATH="$GITHUB_WORKSPACE/vendor/bundle"
+
+          run_suite() {
+            local ref="$1"
+            local report="$2"
+            git checkout --detach "$ref"
+            bundle exec rails db:drop
+            bundle exec rails db:create
+            bundle exec rails db:schema:load
+            set +e
+            bundle exec rspec --format progress --format RspecJunitFormatter --out "$report"
+            local status=$?
+            set -e
+            if [[ ! -s "$report" ]]; then
+              echo "::error::RSpec did not produce a JUnit report for $ref (exit $status)."
+              return 1
+            fi
+            return 0
+          }
+
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != "$HEAD_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            git worktree add --detach "$baseline_dir" "$BASE_SHA"
+            (
+              cd "$baseline_dir"
+              run_suite "$BASE_SHA" "$base_report"
+            )
+            git worktree remove --force "$baseline_dir"
+            run_suite "$HEAD_SHA" "$head_report"
+            python3 .github/scripts/compare-rspec-results.py "$base_report" "$head_report"
+          else
+            run_suite "$HEAD_SHA" "$head_report"
+          fi
+
+      - name: Upload RSpec report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rspec-report-${{ github.run_id }}
+          path: ${{ runner.temp }}/rspec-*.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  docker-build:
+    needs: [ruby-quality, rspec]
+    name: Publish validated production candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build validated candidate
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          file: ./Dockerfile.knowledge
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            RAILS_ENV=production
+            BUNDLE_WITHOUT=development:test
+            RAILS_SERVE_STATIC_FILES=true
+            GIT_SHA=${{ github.sha }}
+          tags: ghcr.io/murilloimparavel/crcn-knowledge-crm:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  pr-gate:
+    name: CRM required checks
+    if: always()
+    needs: [ruby-quality, rspec, docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all CI jobs to pass
+        env:
+          QUALITY_RESULT: ${{ needs.ruby-quality.result }}
+          RSPEC_RESULT: ${{ needs.rspec.result }}
+          DOCKER_RESULT: ${{ needs.docker-build.result }}
+        run: |
+          set -euo pipefail
+          for result in "$QUALITY_RESULT" "$RSPEC_RESULT" "$DOCKER_RESULT"; do
+            if [[ "$result" != success ]]; then
+              echo "::error::A required CRM CI job did not succeed: $result"
+              exit 1
+            fi
+          done
+          echo "All CRM CI checks passed."

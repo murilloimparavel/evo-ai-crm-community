@@ -26,6 +26,11 @@ class Pipeline < ApplicationRecord
   VALID_TYPES = %w[sales support onboarding custom marketing].freeze
 
   belongs_to :created_by, class_name: 'User'
+  # The database FK nullifies this optional target while retaining immutable approval history.
+  has_many :pipeline_classification_catalogs # rubocop:disable Rails/HasManyOrHasOneDependent
+  before_validation :set_default_custom_fields
+  before_save :ensure_single_default_per_account, if: :is_default?
+  after_update :invalidate_classification_catalog, if: -> { saved_change_to_config? || saved_change_to_is_active? }
 
   has_many :pipeline_stages, -> { order(:position) }, dependent: :destroy, inverse_of: :pipeline
   has_many :pipeline_items, dependent: :destroy
@@ -55,10 +60,12 @@ class Pipeline < ApplicationRecord
       .or(where(visibility: :team, id: team_pipeline_ids))
   }
 
-  before_validation :set_default_custom_fields
-  before_save :ensure_single_default_per_account, if: :is_default?
   after_update :cleanup_removed_attributes_from_items
   after_save :drop_team_links_unless_team_visible
+
+  def invalidate_classification_catalog
+    PipelineClassification::Lifecycle.pipeline_changed!(pipeline: self)
+  end
 
   def add_conversation(conversation, stage = nil, user = nil)
     stage ||= pipeline_stages.first
@@ -81,7 +88,7 @@ class Pipeline < ApplicationRecord
       assigned_by: user
     )
   end
-  
+
   def item_count
     pipeline_items.count
   end
@@ -133,27 +140,28 @@ class Pipeline < ApplicationRecord
     # Desativa outros pipelines default quando este for ativado
     Pipeline.where(is_default: true)
             .where.not(id: id)
-            .update_all(is_default: false)
+            .update_all(is_default: false) # rubocop:disable Rails/SkipsModelValidations -- Preserve the existing bulk default reset without recursive callbacks.
   end
 
   def set_default_custom_fields
     self.custom_fields = {} if custom_fields.blank?
     # Ensure attributes is always an array
-    self.custom_fields['attributes'] ||= []
+    custom_fields['attributes'] ||= []
     # Normalize: keep only attributes array, remove any other keys
     self.custom_fields = { 'attributes' => custom_fields['attributes'] }
   end
 
-  def cleanup_removed_attributes_from_items
+  # Preserve the existing attribute-removal cleanup callback contract.
+  def cleanup_removed_attributes_from_items # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return unless saved_change_to_custom_fields?
 
     old_value, new_value = saved_change_to_custom_fields
     old_attributes = (old_value&.dig('attributes') || []).map(&:to_s)
     new_attributes = (new_value&.dig('attributes') || []).map(&:to_s)
-    
+
     # Find attributes that were removed
     removed_attributes = old_attributes - new_attributes
-    
+
     return if removed_attributes.empty?
 
     # Clean up removed attributes from all pipeline items
@@ -181,5 +189,4 @@ class Pipeline < ApplicationRecord
       end
     end
   end
-
 end

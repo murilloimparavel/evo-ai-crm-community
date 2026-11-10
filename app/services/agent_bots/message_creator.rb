@@ -42,7 +42,7 @@ class AgentBots::MessageCreator
     return false unless conversation.open? || conversation.pending?
     return false if conversation.custom_attributes&.dig('archived').to_s == 'true'
 
-    source = conversation.messages.incoming.order(created_at: :desc).first
+    source = conversation.messages.incoming.reorder(created_at: :desc, id: :desc).first
     return false unless source && source.created_at > 24.hours.ago
     return false unless conversation.custom_attributes&.dig('urgent_followup_message_id') == source.id
 

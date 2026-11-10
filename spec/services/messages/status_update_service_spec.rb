@@ -8,6 +8,8 @@ RSpec.describe Messages::StatusUpdateService do
       Message,
       id: 1,
       status: 'sent',
+      has_attribute?: true,
+      followup_execution_id: nil,
       content_attributes: {},
       read?: false,
       failed?: false,

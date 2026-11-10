@@ -34,6 +34,12 @@ trigger_imap_email_inboxes_job:
   queue: scheduled_jobs
 
 # executed At every minute to check for inactive conversations and trigger actions
+urgent_unanswered_conversations_job:
+  cron: '* * * * *'
+  class: 'Conversations::UrgentUnansweredJob'
+  queue: scheduled_jobs
+  description: 'Route unanswered conversations to urgent follow-up after two minutes'
+
 agent_bots_inactivity_check_scheduler_job:
   cron: '* * * * *'
   class: 'AgentBots::InactivityCheckSchedulerJob'
@@ -47,6 +53,22 @@ urgent_unanswered_conversations_job:
   description: 'Route unanswered conversations to urgent follow-up after two minutes'
 
 # executed At every minute to fire stage-level inactivity automation rules
+pipeline_classification_scheduler_job:
+  cron: '* * * * *'
+  class: 'PipelineClassification::SchedulerJob'
+  queue: pipeline_classification
+
+pipeline_classification_retention_job:
+  cron: '35 3 * * *'
+  class: 'PipelineClassification::RetentionJob'
+  queue: pipeline_classification
+
+modular_followup_scheduler_job:
+  cron: '* * * * *'
+  class: 'Followups::SchedulerJob'
+  queue: scheduled_jobs
+  description: 'Recover due stage classifications and authorized follow-ups; unconfigured policies stay OFF'
+
 pipelines_stage_inactivity_check_scheduler_job:
   cron: '* * * * *'
   class: 'Pipelines::StageInactivityCheckSchedulerJob'
@@ -102,3 +124,9 @@ whatsapp_credential_probe_scheduler_job:
   class: 'Channels::Whatsapp::CredentialProbeSchedulerJob'
   queue: low
   description: 'Re-probe token-based whatsapp credentials and refresh the verified stamp'
+
+# Database-backed delivery recovery after worker/runtime outages or failed enqueue.
+bot_runtime_replay_pending_deliveries_job:
+  cron: '* * * * *'
+  class: 'BotRuntime::ReplayPendingDeliveriesJob'
+  queue: scheduled_jobs

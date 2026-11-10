@@ -48,7 +48,17 @@ class Notification::PushNotificationService
   end
 
   def push_url
-    "#{ENV.fetch('FRONTEND_URL', 'http://localhost:3000').chomp('/')}/conversations/#{conversation.display_id}"
+    "/conversations/#{conversation.display_id}"
+  end
+
+  def vapid_subject
+    subject = ENV['VAPID_SUBJECT'].presence || ENV['FRONTEND_URL'].presence
+    uri = URI.parse(subject.to_s)
+    return subject if uri.is_a?(URI::MailTo) || (uri.is_a?(URI::HTTPS) && uri.host.present?)
+
+    raise ArgumentError, 'VAPID_SUBJECT or FRONTEND_URL must be a mailto or HTTPS URL'
+  rescue URI::InvalidURIError
+    raise ArgumentError, 'VAPID_SUBJECT or FRONTEND_URL must be a mailto or HTTPS URL'
   end
 
   def can_send_browser_push?(subscription)
@@ -62,7 +72,7 @@ class Notification::PushNotificationService
       p256dh: subscription.subscription_attributes['p256dh'],
       auth: subscription.subscription_attributes['auth'],
       vapid: {
-        subject: push_url,
+        subject: vapid_subject,
         public_key: VapidService.public_key,
         private_key: VapidService.private_key
       },
@@ -85,6 +95,7 @@ class Notification::PushNotificationService
   rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout => e
     Rails.logger.error "WebPush operation error: #{e.message}"
   rescue StandardError => e
+    Rails.logger.error("WebPush delivery failed for subscription #{subscription.id}: #{e.class}")
     EvolutionExceptionTracker.new(e, account: nil).capture_exception
     true
   end

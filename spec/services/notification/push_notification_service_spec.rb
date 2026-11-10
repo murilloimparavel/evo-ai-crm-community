@@ -50,6 +50,38 @@ RSpec.describe Notification::PushNotificationService do
     end
   end
 
+  describe 'user preferences' do
+    let(:user) { User.new(email: 'agent@example.com') }
+    let(:setting) { NotificationSetting.new }
+    let(:subscription) { instance_double(NotificationSubscription, id: 'one', subscription_type: 'browser_push') }
+
+    before do
+      allow(notification).to receive(:user).and_return(user)
+      allow(user).to receive_messages(notification_settings: [setting], notification_subscriptions: [subscription])
+      allow(service).to receive(:send_browser_push)
+      allow(service).to receive(:send_fcm_push)
+      allow(service).to receive(:send_push_via_evolution_hub)
+    end
+
+    it 'sends to the user subscriptions when the message preference is enabled' do
+      allow(setting).to receive(:push_assigned_conversation_new_message?).and_return(true)
+      service.perform
+      expect(service).to have_received(:send_browser_push).with(subscription)
+    end
+
+    it 'does not send when the message preference is disabled' do
+      allow(setting).to receive(:push_assigned_conversation_new_message?).and_return(false)
+      service.perform
+      expect(service).not_to have_received(:send_browser_push)
+    end
+
+    it 'does not send when the user has no notification settings' do
+      allow(user).to receive(:notification_settings).and_return([])
+      service.perform
+      expect(service).not_to have_received(:send_browser_push)
+    end
+  end
+
   it 'requires an appropriate VAPID subject instead of using an empty frontend URL' do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with('VAPID_SUBJECT').and_return('')

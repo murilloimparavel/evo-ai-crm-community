@@ -1,21 +1,23 @@
 class Api::V1::NotificationSubscriptionsController < Api::BaseController
   before_action :set_user
 
+  def show
+    render json: { vapid_public_key: VapidService.public_key }
+  end
+
   def create
-    Rails.logger.info("📱 [SUBSCRIPTION API] Creating subscription for user #{@user.email}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Raw params: #{params.inspect}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Permitted params: #{notification_subscription_params.inspect}")
-
-    notification_subscription = NotificationSubscriptionBuilder.new(user: @user, params: notification_subscription_params).perform
-
-    Rails.logger.info("📱 [SUBSCRIPTION API] Subscription created successfully: #{notification_subscription.id}, type: #{notification_subscription.subscription_type}")
-
-    render json: notification_subscription
+    subscription = NotificationSubscriptionBuilder.new(user: @user, params: notification_subscription_params).perform
+    render json: { id: subscription.id, subscription_type: subscription.subscription_type }
   end
 
   def destroy
-    notification_subscription = NotificationSubscription.where(["subscription_attributes->>'push_token' = ?", params[:push_token]]).first
-    notification_subscription.destroy! if notification_subscription.present?
+    # Both browser and native clients may remove only their own subscription.
+    subscriptions = @user.notification_subscriptions
+    if params[:endpoint].present?
+      subscriptions.browser_push.where(identifier: params[:endpoint]).destroy_all
+    elsif params[:push_token].present?
+      subscriptions.fcm.where("subscription_attributes->>'push_token' = ?", params[:push_token]).destroy_all
+    end
     head :ok
   end
 

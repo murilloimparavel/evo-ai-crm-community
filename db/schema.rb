@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_11_04_170000) do
+ActiveRecord::Schema[7.1].define(version: 2026_11_10_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -187,6 +187,35 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_04_170000) do
     t.jsonb "flow_data"
     t.index ["flow_data"], name: "index_automation_rules_on_flow_data", using: :gin
     t.index ["mode"], name: "index_automation_rules_on_mode"
+  end
+
+  create_table "bot_runtime_deliveries", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "message_id", null: false
+    t.uuid "agent_bot_id", null: false
+    t.text "message_content", default: "", null: false
+    t.string "lease_token"
+    t.datetime "skipped_at"
+    t.string "skipped_reason"
+    t.datetime "delivered_at"
+    t.datetime "next_attempt_at", default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.integer "attempts", default: 0, null: false
+    t.string "last_error"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["message_id", "agent_bot_id"], name: "index_bot_runtime_deliveries_on_message_id_and_agent_bot_id", unique: true
+    t.index ["next_attempt_at"], name: "index_pending_bot_runtime_deliveries", where: "((delivered_at IS NULL) AND (skipped_at IS NULL))"
+  end
+
+  create_table "bot_runtime_message_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "message_id", null: false
+    t.datetime "processed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.datetime "next_attempt_at", default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.integer "attempts", default: 0, null: false
+    t.index ["created_at"], name: "index_bot_runtime_message_events_on_created_at", where: "(processed_at IS NULL)"
+    t.index ["message_id"], name: "index_bot_runtime_message_events_on_message_id", unique: true
+    t.index ["next_attempt_at", "id"], name: "index_pending_runtime_message_event_retries", where: "(processed_at IS NULL)"
   end
 
   create_table "canned_responses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1773,6 +1802,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_04_170000) do
     t.index ["inbox_id"], name: "index_working_hours_on_inbox_id"
   end
 
+  add_foreign_key "bot_runtime_deliveries", "agent_bots", on_delete: :cascade
+  add_foreign_key "bot_runtime_deliveries", "messages", on_delete: :cascade
+  add_foreign_key "bot_runtime_message_events", "messages", on_delete: :cascade
   add_foreign_key "access_tokens", "users", column: "issued_id"
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"

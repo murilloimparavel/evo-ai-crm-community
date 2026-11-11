@@ -15,6 +15,9 @@ class Ai::CredentialResolver
   # so a key from one credential with a URL from elsewhere hits the wrong server.
   # `base_url` nil means "use the consumer's default".
   Endpoint = Struct.new(:key, :base_url, :provider, keyword_init: true)
+  PROVIDER_DEFAULT_BASE_URLS = {
+    'openrouter' => 'https://openrouter.ai/api/v1'
+  }.freeze
 
   # Returns the credential record in effect, or nil when no link in the chain
   # offers a usable one. Never raises for "nothing configured" — that is an
@@ -61,7 +64,7 @@ class Ai::CredentialResolver
     if key.present?
       return Endpoint.new(
         key: key,
-        base_url: credential.base_url.presence,
+        base_url: credential.base_url.presence || PROVIDER_DEFAULT_BASE_URLS[credential.provider],
         provider: credential.provider
       )
     end

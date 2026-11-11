@@ -9,41 +9,45 @@ module BotRuntime
       return unless Config.enabled?
 
       journal = MessageEvent.find_by(id: event_id)
-      return unless journal
+      process_journal(journal) if journal
+    rescue StandardError
+      schedule_retry(journal) if journal
+      raise
+    end
 
+    private
+
+    def process_journal(journal)
       journal.with_lock do
-        return if journal.processed_at
+        next if journal.processed_at
+
         journal.update!(attempts: journal.attempts + 1)
-        if journal.message.inbox.agent_bot_inbox&.moderation_enabled?
-          # Configuration changed after capture: never replay newly enabled
-          # moderation side effects through this non-moderated journal.
-          journal.update!(processed_at: Time.current)
-          return
-        end
-        if Delivery.exists?(message_id: journal.message_id)
-          journal.update!(processed_at: Time.current)
-          return
-        end
-        # Reuse channel and conversation eligibility rules. On a
-        # retry these are evaluated again; no bypass based on stale eligibility.
-        event = Events::Base.new('message.created', journal.created_at,
-                                 message: journal.message, runtime_journal_replay: true)
-        AgentBotListener.instance.message_created(event)
+        dispatch(journal) unless already_handled?(journal)
         journal.update!(processed_at: Time.current)
       end
-    rescue StandardError
-      if journal && !journal.processed_at
-        # The listener transaction rolled back. Persist retry scheduling outside
-        # that transaction so a failed evaluation rotates behind untouched work.
-        journal.with_lock do
-          unless journal.processed_at
-            attempts = journal.attempts + 1
-            delay = [2**[attempts, 10].min, 600].min.seconds
-            journal.update!(attempts: attempts, next_attempt_at: delay.from_now)
-          end
-        end
+    end
+
+    def already_handled?(journal)
+      # Moderation enabled after capture must never replay moderation side effects.
+      journal.message.inbox.agent_bot_inbox&.moderation_enabled? || Delivery.exists?(message_id: journal.message_id)
+    end
+
+    def dispatch(journal)
+      # Re-evaluate channel and conversation eligibility on every attempt.
+      event = Events::Base.new('message.created', journal.created_at,
+                               message: journal.message, runtime_journal_replay: true)
+      AgentBotListener.instance.message_created(event)
+    end
+
+    def schedule_retry(journal)
+      # Rotate failed work after the listener transaction has rolled back.
+      journal.with_lock do
+        next if journal.processed_at
+
+        attempts = journal.attempts + 1
+        delay = [2**[attempts, 10].min, 600].min.seconds
+        journal.update!(attempts: attempts, next_attempt_at: delay.from_now)
       end
-      raise
     end
   end
 end

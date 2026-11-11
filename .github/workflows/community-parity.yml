@@ -19,7 +19,7 @@ env:
 jobs:
   parity:
     name: RBAC parity — pure community install, no consumer (EVO-2117)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     services:

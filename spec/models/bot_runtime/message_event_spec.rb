@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-RSpec.describe 'Bot Runtime transactional message journal' do
+RSpec.describe BotRuntime::MessageEvent do
   let(:contact) { Contact.create!(name: 'Journal Spec') }
   let(:inbox) { Inbox.create!(name: 'Journal Spec', channel: Channel::Api.create!) }
   let(:contact_inbox) { ContactInbox.create!(inbox: inbox, contact: contact, source_id: SecureRandom.hex(8)) }
@@ -20,21 +20,21 @@ RSpec.describe 'Bot Runtime transactional message journal' do
 
   it 'persists the message journal before commit even when enqueue never runs' do
     message.save!
-    expect(BotRuntime::MessageEvent.find_by(message_id: message.id)).to be_present
+    expect(described_class.find_by(message_id: message.id)).to be_present
   end
 
   it 'rolls back the journal with a rolled back message' do
     Message.transaction(requires_new: true) do
       message.save!
-      expect(BotRuntime::MessageEvent.find_by(message_id: message.id)).to be_present
+      expect(described_class.find_by(message_id: message.id)).to be_present
       raise ActiveRecord::Rollback
     end
-    expect(BotRuntime::MessageEvent.find_by(message_id: message.id)).to be_nil
+    expect(described_class.find_by(message_id: message.id)).to be_nil
   end
 
   it 'keeps moderated inboxes on the existing path' do
-    allow(inbox).to receive(:agent_bot_inbox).and_return(double(moderation_enabled?: true))
+    allow(inbox).to receive(:agent_bot_inbox).and_return(instance_double(AgentBotInbox, moderation_enabled?: true))
     message.save!
-    expect(BotRuntime::MessageEvent.find_by(message_id: message.id)).to be_nil
+    expect(described_class.find_by(message_id: message.id)).to be_nil
   end
 end

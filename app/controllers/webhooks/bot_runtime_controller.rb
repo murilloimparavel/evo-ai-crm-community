@@ -34,7 +34,7 @@ class Webhooks::BotRuntimeController < ActionController::API
       next existing if existing
 
       attributes = (options[:content_attributes] || {}).merge(runtime_delivery_id: delivery_id)
-      AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, **options.merge(content_attributes: attributes))
+      AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, **options, content_attributes: attributes)
     end
   end
 
@@ -49,8 +49,8 @@ class Webhooks::BotRuntimeController < ActionController::API
     content_type = params[:content_type].presence || 'text'
     create_reply = lambda do
       create_runtime_reply(bot, conversation, content, force: params[:force] == true,
-                                                                                 content_type: content_type,
-                                                                                 content_attributes: select_attributes(content_type), media: media)
+                                                       content_type: content_type,
+                                                       content_attributes: select_attributes(content_type), media: media)
     end
     return create_reply.call if params[:knowledge_provenance].blank?
 

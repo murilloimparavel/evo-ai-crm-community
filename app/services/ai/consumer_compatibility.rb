@@ -2,9 +2,8 @@
 
 # Which providers each AI feature can actually talk to (FR18).
 #
-# AI Agents reach every provider through the core service. The others build a
-# `POST /chat/completions` call, so a non-OpenAI provider there is not a
-# misconfiguration but a different protocol, and it fails at the wire.
+# AI Agents reach every provider through the core service. OpenRouter is
+# compatible with inbox chat completions, but not every OpenAI endpoint.
 #
 # New consumers register here; the resolver needs no change.
 class Ai::ConsumerCompatibility
@@ -13,7 +12,7 @@ class Ai::ConsumerCompatibility
   CONSUMERS = {
     ai_agents: ALL_PROVIDERS,
     pipeline_classification: %w[openrouter].freeze,
-    inbox_assist: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
+    inbox_assist: Ai::Credential::INBOX_ASSIST_COMPATIBLE_PROVIDERS,
     # Groq and OpenRouter both expose the OpenAI-compatible audio/transcriptions
     # contract even though the core does not classify them as general chat
     # providers. Keep this allowlist scoped to transcription; accepting them for

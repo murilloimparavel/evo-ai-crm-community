@@ -12,6 +12,7 @@ on:
       - 'spec/**/notification/**'
       - 'spec/requests/api/v1/web_push_spec.rb'
       - '.github/workflows/web-push-candidate.yml'
+      - 'Dockerfile.webpush-candidate'
 
 permissions:
   contents: read
@@ -64,3 +65,6 @@ jobs:
           spec/jobs/notification/test_push_notification_job_spec.rb
           spec/services/notification/push_notification_service_web_push_spec.rb
           spec/services/notification/push_notification_service_spec.rb
+
+      - name: Build candidate from the observed production image (no push)
+        run: docker build --build-arg GIT_SHA="$GITHUB_SHA" -f Dockerfile.webpush-candidate -t local/web-push-candidate:ci .

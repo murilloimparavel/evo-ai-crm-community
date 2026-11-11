@@ -90,6 +90,28 @@ RSpec.describe 'Public Inbound Messages API', type: :request do
       expect(conversation.messages.last.content).to eq(payload[:content])
     end
 
+    it 'adds an image to an existing imported message only once on replay' do
+      post import_path, params: payload, headers: bridge_headers, as: :json
+      message = conversation.messages.last
+      2.times do
+        file = fixture_file_upload('product_image.png', 'image/png')
+        post import_path, params: payload.merge(attachments: [file], attachment_ids: ['file-1']), headers: bridge_headers
+        expect(response).to have_http_status(:ok)
+      end
+      expect(message.reload.attachments.count).to eq(1)
+      expect(conversation.messages.count).to eq(1)
+    end
+
+    it 'imports a new incoming image and deduplicates a repeated upload' do
+      2.times do
+        file = fixture_file_upload('product_image.png', 'image/png')
+        post import_path, params: payload.merge(message_type: 'incoming', attachments: [file], attachment_ids: ['file-2']), headers: bridge_headers
+        expect(response).to have_http_status(:ok)
+      end
+      expect(conversation.messages.count).to eq(1)
+      expect(conversation.messages.last.attachments.count).to eq(1)
+    end
+
     it 'rejects unsupported message directions and missing source IDs' do
       post import_path, params: payload.merge(message_type: 'activity'), headers: bridge_headers, as: :json
       expect(response).to have_http_status(:unprocessable_entity)

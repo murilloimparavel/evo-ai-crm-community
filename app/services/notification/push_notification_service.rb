@@ -14,7 +14,7 @@ class Notification::PushNotificationService
     Rails.logger.info("📱 [PUSH] User #{user.email} has #{notification_subscriptions.count} notification subscription(s)")
 
     notification_subscriptions.each do |subscription|
-      Rails.logger.info("📱 [PUSH] Processing subscription #{subscription.id}, type: #{subscription.subscription_type} (#{subscription.subscription_type_before_type_cast}), identifier: #{subscription.identifier}, push_token: #{subscription.subscription_attributes['push_token']&.first(20)}...")
+      Rails.logger.info("[PUSH] Processing subscription #{subscription.id}, type: #{subscription.subscription_type}")
       send_browser_push(subscription)
       send_fcm_push(subscription)
       send_push_via_evolution_hub(subscription)
@@ -29,7 +29,7 @@ class Notification::PushNotificationService
 
   def user_subscribed_to_notification?
     notification_setting = notification_settings.first
-    return true if notification_setting.public_send("push_#{notification.notification_type}?")
+    return true if notification_setting&.public_send("push_#{notification.notification_type}?")
 
     false
   end
@@ -40,18 +40,19 @@ class Notification::PushNotificationService
 
   def push_message
     {
-      title: notification.push_message_title,
+      title: notification.push_message_title.presence || I18n.t('notifications.no_content'),
+      body: notification.push_message_body,
       tag: "#{notification.notification_type}_#{conversation.display_id}_#{notification.id}",
       url: push_url
     }
   end
 
   def push_url
-    "#{ENV.fetch('FRONTEND_URL', 'http://localhost:3000')}/app/conversations/#{conversation.display_id}"
+    "/conversations/#{conversation.display_id}"
   end
 
   def can_send_browser_push?(subscription)
-    VapidService.public_key && subscription.browser_push?
+    subscription.browser_push? && subscription.valid? && VapidService.public_key.present?
   end
 
   def browser_push_payload(subscription)
@@ -61,7 +62,7 @@ class Notification::PushNotificationService
       p256dh: subscription.subscription_attributes['p256dh'],
       auth: subscription.subscription_attributes['auth'],
       vapid: {
-        subject: push_url,
+        subject: VapidService.subject,
         public_key: VapidService.public_key,
         private_key: VapidService.private_key
       },
@@ -75,13 +76,16 @@ class Notification::PushNotificationService
     return unless can_send_browser_push?(subscription)
 
     WebPush.payload_send(**browser_push_payload(subscription))
-    Rails.logger.info("Browser push sent to #{user.email} with title #{push_message[:title]}")
-  rescue WebPush::ExpiredSubscription, WebPush::InvalidSubscription, WebPush::Unauthorized => e
-    Rails.logger.info "WebPush subscription expired: #{e.message}"
+    Rails.logger.info("Browser push sent for subscription #{subscription.id}")
+  rescue WebPush::ExpiredSubscription, WebPush::InvalidSubscription
+    Rails.logger.info "WebPush subscription expired: #{subscription.id}"
     subscription.destroy!
+  rescue WebPush::Unauthorized
+    Rails.logger.error "WebPush authorization failed for subscription #{subscription.id}"
   rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout => e
     Rails.logger.error "WebPush operation error: #{e.message}"
   rescue StandardError => e
+    Rails.logger.error("WebPush delivery failed for subscription #{subscription.id}: #{e.class}")
     EvolutionExceptionTracker.new(e, account: nil).capture_exception
     true
   end

@@ -1,21 +1,30 @@
 class Api::V1::NotificationSubscriptionsController < Api::BaseController
   before_action :set_user
 
+  def show
+    VapidService.subject
+    public_key = VapidService.public_key
+    raise ArgumentError if public_key.blank? || VapidService.private_key.blank?
+
+    render json: { vapid_public_key: public_key }
+  rescue ArgumentError
+    Rails.logger.warn('[PUSH] Web Push is not configured; check VAPID and frontend settings')
+    render json: { error: 'Web Push is not configured' }, status: :service_unavailable
+  end
+
   def create
-    Rails.logger.info("📱 [SUBSCRIPTION API] Creating subscription for user #{@user.email}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Raw params: #{params.inspect}")
-    Rails.logger.info("📱 [SUBSCRIPTION API] Permitted params: #{notification_subscription_params.inspect}")
-
-    notification_subscription = NotificationSubscriptionBuilder.new(user: @user, params: notification_subscription_params).perform
-
-    Rails.logger.info("📱 [SUBSCRIPTION API] Subscription created successfully: #{notification_subscription.id}, type: #{notification_subscription.subscription_type}")
-
-    render json: notification_subscription
+    subscription = NotificationSubscriptionBuilder.new(user: @user, params: notification_subscription_params).perform
+    render json: { id: subscription.id, subscription_type: subscription.subscription_type }
   end
 
   def destroy
-    notification_subscription = NotificationSubscription.where(["subscription_attributes->>'push_token' = ?", params[:push_token]]).first
-    notification_subscription.destroy! if notification_subscription.present?
+    # Both browser and native clients may remove only their own subscription.
+    subscriptions = @user.notification_subscriptions
+    if params[:endpoint].present?
+      subscriptions.browser_push.where(identifier: params[:endpoint]).destroy_all
+    elsif params[:push_token].present?
+      subscriptions.fcm.where("subscription_attributes->>'push_token' = ?", params[:push_token]).destroy_all
+    end
     head :ok
   end
 

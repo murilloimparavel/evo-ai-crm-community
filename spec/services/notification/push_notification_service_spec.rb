@@ -87,6 +87,15 @@ RSpec.describe Notification::PushNotificationService do
     end
   end
 
+  it 'rejects a partially configured VAPID key pair before generating or persisting keys' do
+    allow(GlobalConfig).to receive(:get).with('VAPID_KEYS').and_return('VAPID_KEYS' => nil)
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with('VAPID_PUBLIC_KEY').and_return('configured-public')
+    allow(ENV).to receive(:[]).with('VAPID_PRIVATE_KEY').and_return('')
+    expect(WebPush).not_to receive(:generate_key)
+    expect { VapidService.public_key }.to raise_error(ArgumentError, /both VAPID keys/)
+  end
+
   it 'requires an appropriate VAPID subject instead of using an empty frontend URL' do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with('VAPID_SUBJECT').and_return('')

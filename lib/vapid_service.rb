@@ -21,11 +21,16 @@ class VapidService
     config = GlobalConfig.get('VAPID_KEYS')
     return config['VAPID_KEYS'] if config['VAPID_KEYS'].present?
 
-    # keys don't exist in the database. so let's generate and save them
-    keys = WebPush.generate_key
-    # TODO: remove the logic on environment variables when we completely deprecate
-    public_key = ENV.fetch('VAPID_PUBLIC_KEY') { keys.public_key }
-    private_key = ENV.fetch('VAPID_PRIVATE_KEY') { keys.private_key }
+    # A half-configured pair must never be combined with a freshly generated key.
+    public_key = ENV['VAPID_PUBLIC_KEY'].presence
+    private_key = ENV['VAPID_PRIVATE_KEY'].presence
+    raise ArgumentError, 'Configure both VAPID keys or neither' if public_key.present? != private_key.present?
+
+    if public_key.blank?
+      keys = WebPush.generate_key
+      public_key = keys.public_key
+      private_key = keys.private_key
+    end
 
     i = InstallationConfig.where(name: 'VAPID_KEYS').first_or_create!(value: { public_key: public_key, private_key: private_key })
     i.value

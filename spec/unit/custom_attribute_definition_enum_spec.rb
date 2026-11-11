@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+ENV['RAILS_ENV'] ||= 'test'
+require_relative '../../config/environment'
+require_relative '../../app/models/custom_attribute_definition'
 
 RSpec.describe 'CustomAttributeDefinition enum mapping' do
   it 'defines datetime display type mapped to 8' do
-    source = File.read(File.expand_path('../../app/models/custom_attribute_definition.rb', __dir__))
-
-    expect(source).to match(/enum\s+attribute_display_type:\s*\{[^}]*datetime:\s*8[^}]*\}/m)
+    expect(CustomAttributeDefinition.attribute_display_types['datetime']).to eq(8)
   end
 end

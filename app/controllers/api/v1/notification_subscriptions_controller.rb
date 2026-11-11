@@ -2,7 +2,14 @@ class Api::V1::NotificationSubscriptionsController < Api::BaseController
   before_action :set_user
 
   def show
-    render json: { vapid_public_key: VapidService.public_key }
+    VapidService.subject
+    public_key = VapidService.public_key
+    raise ArgumentError if public_key.blank? || VapidService.private_key.blank?
+
+    render json: { vapid_public_key: public_key }
+  rescue ArgumentError
+    Rails.logger.warn('[PUSH] Web Push is not configured; check VAPID and frontend settings')
+    render json: { error: 'Web Push is not configured' }, status: :service_unavailable
   end
 
   def create

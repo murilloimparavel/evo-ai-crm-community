@@ -16,10 +16,24 @@ RSpec.describe 'Notification subscriptions', type: :request do
   # rubocop:enable RSpec/AnyInstance
 
   it 'returns the public key without the private key' do
-    allow(VapidService).to receive(:public_key).and_return('public-key')
+    allow(VapidService).to receive_messages(public_key: 'public-key', private_key: 'private-key',
+                                            subject: 'https://crm.example')
     get '/api/v1/notification_subscriptions'
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body).to eq('vapid_public_key' => 'public-key')
+  end
+
+  it 'refuses activation when the VAPID subject is not configured' do
+    allow(VapidService).to receive(:subject).and_raise(ArgumentError)
+    get '/api/v1/notification_subscriptions'
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.parsed_body).to eq('error' => 'Web Push is not configured')
+  end
+
+  it 'refuses activation when the private VAPID key is missing' do
+    allow(VapidService).to receive_messages(public_key: 'public-key', private_key: nil, subject: 'https://crm.example')
+    get '/api/v1/notification_subscriptions'
+    expect(response).to have_http_status(:service_unavailable)
   end
 
   it 'creates a browser subscription without echoing credentials' do

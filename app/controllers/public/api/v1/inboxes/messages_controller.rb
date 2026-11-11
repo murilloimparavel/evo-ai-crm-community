@@ -18,16 +18,9 @@ class Public::Api::V1::Inboxes::MessagesController < Public::Api::V1::InboxesCon
   # the idempotency key, so a bridge can safely reconcile a timed-out POST.
   def import
     return render json: { error: 'Conversation not found' }, status: :not_found if @conversation.nil?
+    return render_invalid_import unless valid_import_params?
 
-    unless valid_import_params?
-      return render json: { error: 'content, source_id, message_type and external_created_at are required' },
-                    status: :unprocessable_entity
-    end
-
-    @message = @conversation.messages.find_by(source_id: import_params[:source_id])
-    @message ||= @conversation.with_lock do
-      @conversation.messages.find_by(source_id: import_params[:source_id]) || @conversation.messages.create!(import_message_params)
-    end
+    @message = @conversation.with_lock { persist_import_message }
     render json: serialized_import_message, status: :ok
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -42,6 +35,40 @@ class Public::Api::V1::Inboxes::MessagesController < Public::Api::V1::InboxesCon
   end
 
   private
+
+  def render_invalid_import
+    render json: { error: 'content, source_id, message_type and external_created_at are required' },
+           status: :unprocessable_entity
+  end
+
+  def persist_import_message
+    message = @conversation.messages.find_by(source_id: import_params[:source_id]) || @conversation.messages.new(import_message_params)
+    import_attachments(message)
+    message.save! if message.new_record? || message.changed? || message.attachments.any?(&:new_record?)
+    message
+  end
+
+  def import_attachments(message)
+    files = Array(params[:attachments])
+    ids = Array(params[:attachment_ids])
+    validate_attachment_ids!(files, ids)
+    seen = Array(message.external_source_ids&.dig('stays_attachment_ids'))
+    files.zip(ids).each { |file, id| attach_import_file(message, file, id, seen) }
+    message.external_source_ids = (message.external_source_ids || {}).merge('stays_attachment_ids' => seen) if files.any?
+  end
+
+  def validate_attachment_ids!(files, ids)
+    return if files.size == ids.size && ids.none?(&:blank?) && ids.uniq.size == ids.size
+
+    raise ActionController::BadRequest, 'attachment IDs required'
+  end
+
+  def attach_import_file(message, file, id, seen)
+    return if seen.include?(id)
+
+    message.attachments.new(file_type: helpers.file_type(file.content_type), file: file)
+    seen << id
+  end
 
   def build_attachment
     return if params[:attachments].blank?

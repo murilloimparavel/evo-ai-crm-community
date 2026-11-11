@@ -56,6 +56,7 @@ jobs:
           ruby-version: '3.4.4'
           bundler-cache: true
       - run: bundle exec rails db:schema:load
+      - run: bundle exec rails db:migrate
       - name: Test current production contracts and Web Push integration
         run: >-
           bundle exec rspec

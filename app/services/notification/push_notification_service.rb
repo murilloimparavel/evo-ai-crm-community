@@ -40,7 +40,7 @@ class Notification::PushNotificationService
   def push_message
     {
       title: [channel_label, notification.push_message_title].reject(&:blank?).join(' · '),
-      body: 'Abra o app para ver a mensagem.',
+      body: notification.push_message_body,
       notification_id: notification.id,
       user_id: user.id,
       channel: channel_label,
@@ -63,7 +63,9 @@ class Notification::PushNotificationService
   end
 
   def can_send_browser_push?(subscription)
-    VapidService.public_key && subscription.browser_push?
+    subscription.browser_push? &&
+      Notification::TestPushNotificationJob.supported_endpoint?(subscription.subscription_attributes['endpoint']) &&
+      VapidService.public_key.present?
   end
 
   def browser_push_payload(subscription)
@@ -73,7 +75,7 @@ class Notification::PushNotificationService
       p256dh: subscription.subscription_attributes['p256dh'],
       auth: subscription.subscription_attributes['auth'],
       vapid: {
-        subject: push_url,
+        subject: VapidService.subject,
         public_key: VapidService.public_key,
         private_key: VapidService.private_key
       },
@@ -87,10 +89,12 @@ class Notification::PushNotificationService
     return unless can_send_browser_push?(subscription)
 
     WebPush.payload_send(**browser_push_payload(subscription))
-    Rails.logger.info("Browser push sent to #{user.email} with title #{push_message[:title]}")
+    Rails.logger.info("Browser push sent for subscription #{subscription.id}")
   rescue WebPush::ExpiredSubscription, WebPush::InvalidSubscription => e
     Rails.logger.info "WebPush subscription expired: #{e.message}"
     subscription.destroy!
+  rescue WebPush::Unauthorized
+    Rails.logger.error("WebPush authorization failed for subscription #{subscription.id}")
   rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout => e
     Rails.logger.error "WebPush operation error: #{e.message}"
   rescue StandardError => e

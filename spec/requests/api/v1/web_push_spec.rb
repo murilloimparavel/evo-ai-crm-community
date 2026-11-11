@@ -9,6 +9,7 @@ RSpec.describe 'Web Push subscriptions', type: :request do
 
   before do
     allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
+    allow(VapidService).to receive(:subject).and_return('https://crm.example.test')
     actor = user
     allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) { Current.user = actor } # rubocop:disable RSpec/AnyInstance
   end
@@ -22,10 +23,10 @@ RSpec.describe 'Web Push subscriptions', type: :request do
   end
 
   it 'exposes the existing public VAPID key without returning private key material' do
-    allow(VapidService).to receive(:public_key).and_return(keys.public_key)
+    allow(VapidService).to receive_messages(public_key: keys.public_key, private_key: keys.private_key)
     get '/api/v1/notification_subscriptions'
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body).to eq('public_key' => keys.public_key)
+    expect(response.parsed_body).to eq('public_key' => keys.public_key, 'vapid_public_key' => keys.public_key)
     expect(response.body).not_to include(keys.private_key)
   end
 
@@ -39,6 +40,12 @@ RSpec.describe 'Web Push subscriptions', type: :request do
     get '/api/v1/notification_subscriptions'
     expect(response.parsed_body.fetch('public_key')).to eq(public_key)
     expect(InstallationConfig.find_by!(name: 'VAPID_KEYS').value['private_key']).to be_present
+  end
+
+  it 'does not advertise a working configuration when the VAPID subject is missing' do
+    allow(VapidService).to receive(:subject).and_raise(ArgumentError)
+    get '/api/v1/notification_subscriptions'
+    expect(response).to have_http_status(:service_unavailable)
   end
 
   it 'persists and renews a browser subscription without duplicates' do

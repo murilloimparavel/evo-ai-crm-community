@@ -1,0 +1,17 @@
+# Derived from the exact CRM image observed in production; no database changes.
+FROM ghcr.io/murilloimparavel/crcn-knowledge-crm@sha256:681278e27da672ab0dace7237c7ab7ebc79e156f77830b1fb77bd068128b4166
+
+COPY app/builders/notification_subscription_builder.rb /app/app/builders/notification_subscription_builder.rb
+COPY app/controllers/api/v1/notification_subscriptions_controller.rb /app/app/controllers/api/v1/notification_subscriptions_controller.rb
+COPY app/jobs/notification/test_push_notification_job.rb /app/app/jobs/notification/test_push_notification_job.rb
+COPY app/services/notification/push_notification_service.rb /app/app/services/notification/push_notification_service.rb
+COPY lib/vapid_service.rb /app/lib/vapid_service.rb
+
+ARG GIT_SHA
+RUN test -n "$GIT_SHA" && printf '%s\n' "$GIT_SHA" > /app/.git_sha && \
+    ruby -c /app/app/builders/notification_subscription_builder.rb && \
+    ruby -c /app/app/controllers/api/v1/notification_subscriptions_controller.rb && \
+    ruby -c /app/app/jobs/notification/test_push_notification_job.rb && \
+    ruby -c /app/app/services/notification/push_notification_service.rb && \
+    ruby -c /app/lib/vapid_service.rb
+LABEL org.opencontainers.image.revision=$GIT_SHA

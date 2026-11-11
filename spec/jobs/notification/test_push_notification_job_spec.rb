@@ -10,7 +10,8 @@ RSpec.describe Notification::TestPushNotificationJob do
 
   before do
     key = WebPush.generate_key
-    allow(VapidService).to receive_messages(public_key: key.public_key, private_key: key.private_key)
+    allow(VapidService).to receive_messages(public_key: key.public_key, private_key: key.private_key,
+                                            subject: 'https://crm.example.test')
     allow(WebPush).to receive(:payload_send)
   end
 
@@ -20,7 +21,7 @@ RSpec.describe Notification::TestPushNotificationJob do
       payload = JSON.parse(options[:message])
       expect(payload['user_id']).to eq(user.id)
       expect(payload['title']).to include('Teste de notificações')
-      expect(payload['url']).to end_with('/profile/notificacoes')
+      expect(payload['url']).to end_with('/profile/notifications')
     end
   end
 

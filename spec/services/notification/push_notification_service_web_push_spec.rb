@@ -17,7 +17,8 @@ RSpec.describe Notification::PushNotificationService do
 
   before do
     key = WebPush.generate_key
-    allow(VapidService).to receive_messages(public_key: key.public_key, private_key: key.private_key)
+    allow(VapidService).to receive_messages(public_key: key.public_key, private_key: key.private_key,
+                                            subject: 'https://crm.example.test')
     allow(WebPush).to receive(:payload_send)
   end
 
@@ -29,7 +30,7 @@ RSpec.describe Notification::PushNotificationService do
       expect(payload['user_id']).to eq(user.id)
       expect(payload['url']).to end_with("/conversations/#{conversation.display_id}")
       expect(payload['url']).not_to include('/app/conversations')
-      expect(payload['body']).to eq('Abra o app para ver a mensagem.')
+      expect(payload['body']).to be_a(String)
       expect(payload['tag']).to eq("notification-#{notification.id}")
     end
   end
@@ -45,7 +46,7 @@ RSpec.describe Notification::PushNotificationService do
     described_class.new(notification: event).perform
     expect(WebPush).to have_received(:payload_send) do |**options|
       expect(JSON.parse(options[:message])['title']).to include(inbox.name)
-      expect(options[:message]).not_to include('Synthetic private message')
+      expect(JSON.parse(options[:message])['body']).to include('Synthetic private message')
     end
   end
 

@@ -35,6 +35,7 @@
 #  index_messages_on_source_id                  (source_id)
 #
 class Message < ApplicationRecord
+  include KnowledgeProvenanceInvalidation
   include MessageFilterHelpers
   include Liquidable
   include Wisper::Publisher
@@ -128,6 +129,7 @@ class Message < ApplicationRecord
 
   belongs_to :inbox
   belongs_to :conversation, touch: true
+  belongs_to :followup_execution, optional: true
   belongs_to :sender, polymorphic: true, optional: true
 
   # Attachments funcionam normalmente porque usam associação polimórfica
@@ -136,12 +138,26 @@ class Message < ApplicationRecord
   has_one :csat_survey_response, dependent: :destroy_async
   has_many :notifications, as: :primary_actor, dependent: :destroy_async
 
+  after_create :journal_bot_runtime_event, unless: :imported?
   after_create_commit :execute_after_create_commit_callbacks, unless: :imported?
+  after_create :invalidate_followup_cycle
+  after_update :invalidate_followup_content
+  after_create_commit -> { PipelineClassification::ModelHooks.message_created(self) }
+  after_update_commit -> { PipelineClassification::ModelHooks.message_updated(self) }
+  after_destroy_commit -> { PipelineClassification::ModelHooks.message_destroyed(self) }
   after_create_commit :publish_message_created, unless: :imported?
   after_create_commit :sync_message_event, unless: :imported?
   after_update_commit :dispatch_update_event
   after_update_commit :publish_message_updated
   after_destroy_commit :publish_message_deleted
+
+  def invalidate_followup_cycle
+    Followups::Lifecycle.message_created(self)
+  end
+
+  def invalidate_followup_content
+    Followups::Lifecycle.message_updated(self)
+  end
 
   def channel_token
     @token ||= inbox.channel.try(:page_access_token)
@@ -336,6 +352,16 @@ class Message < ApplicationRecord
 
   def ensure_content_type
     self.content_type ||= Message.content_types[:text]
+  end
+
+  # Capture within the message transaction; eligibility remains in the listener.
+  def journal_bot_runtime_event
+    return unless incoming? && BotRuntime::Config.enabled? && inbox&.active_bot?
+    # Moderation has external effects and needs its own idempotent event journal;
+    # retain its existing listener path rather than replaying those effects.
+    return if inbox.agent_bot_inbox&.moderation_enabled?
+
+    BotRuntime::MessageEvent.create!(message_id: id)
   end
 
   def execute_after_create_commit_callbacks

@@ -114,7 +114,54 @@ jobs:
           printf 'add_foreign_key "widgets", "users"\n# add_foreign_key "new_table", "conversations"\n' > "$tmp/comment_schema.rb"
           expect_pass "a commented-out FK line" "$tmp/comment_schema.rb" "$tmp/empty_allow.txt" - -
 
-          echo "self-test OK (10 cases)"
+          # 11. SET NULL preserves a ledger when its exact final FK column is nullable.
+          cat > "$tmp/nullify_schema.rb" <<'RUBY'
+          create_table "audit_ledgers" do |t|
+            t.uuid "conversation_id"
+            t.uuid "anchor_message_id"
+          end
+          add_foreign_key "audit_ledgers", "conversations", on_delete: :nullify
+          add_foreign_key "audit_ledgers", "messages", column: "anchor_message_id", on_delete: :nullify
+          RUBY
+          expect_pass "nullable SET NULL including an explicit FK column" \
+            "$tmp/nullify_schema.rb" "$tmp/empty_allow.txt" - -
+
+          # 12. SET NULL with NOT NULL is still a deletion failure.
+          sed 's/t.uuid "conversation_id"/t.uuid "conversation_id", null: false/' \
+            "$tmp/nullify_schema.rb" > "$tmp/nonnull_nullify_schema.rb"
+          expect_fail "SET NULL against a NOT NULL column" \
+            "$tmp/nonnull_nullify_schema.rb" "$tmp/empty_allow.txt" - -
+
+          # 13. Missing column metadata must not be treated as nullable by default.
+          sed '/t.uuid "conversation_id"/d' "$tmp/nullify_schema.rb" > "$tmp/missing_nullify_column.rb"
+          expect_fail "SET NULL without a known final FK column" \
+            "$tmp/missing_nullify_column.rb" "$tmp/empty_allow.txt" - -
+
+          # 14. Migration-only declarations need the same exact final nullable column.
+          mkdir -p "$tmp/nullify_mig"
+          cat > "$tmp/nullify_mig/20260102000000_create_audit_ledgers.rb" <<'RUBY'
+          class CreateAuditLedgers < ActiveRecord::Migration[7.1]
+            def change
+              create_table :audit_ledgers, id: :uuid do |t|
+                t.references :conversation, type: :uuid, foreign_key: { on_delete: :nullify }
+                t.references :anchor_message, type: :uuid, foreign_key: { to_table: :messages, on_delete: :nullify }
+              end
+            end
+          end
+          RUBY
+          expect_pass "nullable SET NULL declared through migration references" \
+            "$tmp/nullify_schema.rb" "$tmp/empty_allow.txt" "$tmp/nullify_mig" -
+          expect_fail "migration SET NULL without a known final nullable column" \
+            "$tmp/inert_schema.rb" "$tmp/empty_allow.txt" "$tmp/nullify_mig" -
+
+          # 15. An explicitly non-nullable new migration cannot borrow a nullable dump.
+          sed 's/type: :uuid, foreign_key:/type: :uuid, null: false, foreign_key:/' \
+            "$tmp/nullify_mig/20260102000000_create_audit_ledgers.rb" > "$tmp/nonnull_migration.rb"
+          mv "$tmp/nonnull_migration.rb" "$tmp/nullify_mig/20260102000000_create_audit_ledgers.rb"
+          expect_fail "migration references with NOT NULL and SET NULL" \
+            "$tmp/nullify_schema.rb" "$tmp/empty_allow.txt" "$tmp/nullify_mig" -
+
+          echo "self-test OK (15 cases)"
 
       - name: FK into the contact/conversation delete chain must be cascade or allowlisted (EVO-2187)
         run: bash .github/scripts/check-cascade-deletion-coverage.sh

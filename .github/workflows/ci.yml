@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == pull_request && -n "$BASE_SHA" ]]; then
-            mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- '*.rb')
+            mapfile -t ruby_files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA...$HEAD_SHA" -- '*.rb')
             if ((${#ruby_files[@]} == 0)); then
               echo "No Ruby files changed; skipping RuboCop for this pull request."
               exit 0
@@ -59,22 +59,22 @@ jobs:
               test -f "$baseline_dir/$file" && printf '%s\n' "$baseline_dir/$file"
             done)
             if ((${#base_files[@]} > 0)); then
-              bundle exec rubocop --config "$baseline_dir/.rubocop.yml" --format json \
+              bundle exec rubocop --force-exclusion --config "$baseline_dir/.rubocop.yml" --format json \
                 --out "$RUNNER_TEMP/rubocop-base.json" "${base_files[@]}" || true
             else
               printf '{"files":[]}' > "$RUNNER_TEMP/rubocop-base.json"
             fi
-            bundle exec rubocop --format json --out "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}" || true
+            bundle exec rubocop --force-exclusion --format json --out "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}" || true
             ruby .github/scripts/compare_rubocop_results.rb \
               "$RUNNER_TEMP/rubocop-base.json" "$RUNNER_TEMP/rubocop-head.json" "${ruby_files[@]}"
             git worktree remove --force "$baseline_dir"
           elif [[ "$EVENT_NAME" == push && -n "$BASE_SHA" && "$BASE_SHA" != "0000000000000000000000000000000000000000" ]]; then
-            mapfile -t ruby_files < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.rb')
+            mapfile -t ruby_files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- '*.rb')
             if ((${#ruby_files[@]} == 0)); then
               echo "No Ruby files changed in this push; skipping RuboCop."
               exit 0
             fi
-            bundle exec rubocop --format progress "${ruby_files[@]}"
+            bundle exec rubocop --force-exclusion --format progress "${ruby_files[@]}"
           else
             bundle exec rubocop --format progress
           fi

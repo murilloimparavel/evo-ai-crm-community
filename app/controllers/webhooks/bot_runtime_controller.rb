@@ -5,50 +5,72 @@ class Webhooks::BotRuntimeController < ActionController::API
 
   def postback
     conversation = Conversation.find_by(display_id: params[:conversation_display_id])
-    unless conversation
-      render json: { error: 'Conversation not found' }, status: :not_found
-      return
-    end
+    return render json: { error: 'Conversation not found' }, status: :not_found unless conversation
 
-    agent_bot = find_active_agent_bot(conversation)
-    unless agent_bot
-      render json: { error: 'No active agent bot for this conversation' }, status: :not_found
-      return
-    end
+    bot = find_active_agent_bot(conversation)
+    return render json: { error: 'No active agent bot for this conversation' }, status: :not_found unless bot
 
+    content, media = normalized_content
+    return render json: { error: 'Content is required' }, status: :bad_request if content.blank? && media.blank?
+
+    message = postback_message(conversation, bot, content, media)
+    render_result(message, conversation)
+  rescue KnowledgeRuntime::ResponseProvenance::Denied
+    head :forbidden
+  end
+
+  private
+
+  # This callback stays inside ResponseProvenance.record!: verify the signed
+  # provenance before looking up a previously delivered runtime response.
+  def create_runtime_reply(bot, conversation, content, **options)
+    delivery_id = params[:runtime_delivery_id].to_s
+    return AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, **options) if delivery_id.blank?
+    raise ActionController::BadRequest, 'Invalid runtime delivery ID' if delivery_id.bytesize > 200
+
+    conversation.with_lock do
+      existing = conversation.messages.where(sender: bot)
+                             .where("content_attributes ->> 'runtime_delivery_id' = ?", delivery_id).first
+      next existing if existing
+
+      attributes = (options[:content_attributes] || {}).merge(runtime_delivery_id: delivery_id)
+      AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, **options, content_attributes: attributes)
+    end
+  end
+
+  def normalized_content
     content = params[:content].to_s
-
-    # Resolve media attachments. Prefer the structured attachments the bot_runtime
-    # sends; fall back to extracting media URLs from the text (older bot_runtime
-    # or other callers). The CRM is the safety net for media detection.
     media = resolve_media(content)
     content = strip_media_urls(content, media) if media.present? && params[:attachments].blank?
+    [content, media]
+  end
 
-    if content.blank? && media.blank?
-      render json: { error: 'Content is required' }, status: :bad_request
-      return
-    end
-
+  def postback_message(conversation, bot, content, media)
     content_type = params[:content_type].presence || 'text'
-    raw_items    = params[:items]
-    content_attributes = nil
-
-    if content_type == 'input_select' && raw_items.present?
-      items = raw_items.map { |item| { title: item[:title].to_s, value: item[:value].to_s } }
-      content_attributes = { items: items }
+    create_reply = lambda do
+      create_runtime_reply(bot, conversation, content, force: params[:force] == true,
+                                                       content_type: content_type,
+                                                       content_attributes: select_attributes(content_type), media: media)
     end
+    return create_reply.call if params[:knowledge_provenance].blank?
 
-    message = AgentBots::MessageCreator.new(agent_bot).create_bot_reply(
-      content, conversation,
-      # Bot Runtime may request this bypass only for the single terminal
-      # handoff postback marked by a successful processor transfer result.
-      # Regular bot replies continue through status and ignored-label checks.
-      force: params[:force] == true,
-      content_type: content_type,
-      content_attributes: content_attributes,
-      media: media
-    )
+    validate_provenance_postback!(media, content_type)
+    KnowledgeRuntime::ResponseProvenance.record!(token: params[:knowledge_provenance], content: content,
+                                                 conversation: conversation, bot: bot, &create_reply)
+  end
 
+  def validate_provenance_postback!(media, content_type)
+    raise KnowledgeRuntime::ResponseProvenance::Denied unless ENV['KNOWLEDGE_RESPONSE_PROVENANCE_ENABLED'] == 'true' &&
+                                                              BotRuntime::Config.secret.to_s.bytesize >= 32 && media.empty? && content_type == 'text'
+  end
+
+  def select_attributes(content_type)
+    return nil unless content_type == 'input_select' && params[:items].present?
+
+    { items: params[:items].map { |item| { title: item[:title].to_s, value: item[:value].to_s } } }
+  end
+
+  def render_result(message, conversation)
     if message
       Rails.logger.info "[BotRuntime::Postback] Message created: #{message.id} conversation=#{conversation.display_id}"
       render json: { status: 'sent' }, status: :ok
@@ -57,8 +79,6 @@ class Webhooks::BotRuntimeController < ActionController::API
       render json: { error: 'Message creation failed' }, status: :unprocessable_entity
     end
   end
-
-  private
 
   VALID_MEDIA_FILE_TYPES = %w[image audio video file].freeze
 
@@ -81,7 +101,7 @@ class Webhooks::BotRuntimeController < ActionController::API
 
   # When media came from text extraction, remove those URLs from the text so the
   # link is not duplicated as plain text alongside the rendered media.
-  def strip_media_urls(content, media)
+  def strip_media_urls(content, _media)
     AgentBots::MediaUrlExtractor.call(content)[:text]
   end
 

@@ -5,6 +5,27 @@ require 'rails_helper'
 RSpec.describe Whatsapp::Providers::BaseService do
   subject(:service) { described_class.new(whatsapp_channel: instance_double(Channel::Whatsapp)) }
 
+  describe '#html_to_whatsapp' do
+    let(:url) { 'https://www.centraldereservascaldas.com.br/pt/apartment/LI12J?from=2026-11-02&to=2026-11-08&persons=2' }
+
+    it 'preserves query separators in a plain text URL' do
+      expect(service.html_to_whatsapp(url)).to eq(url)
+    end
+
+    it 'decodes HTML entities from inbox rich text' do
+      expect(service.html_to_whatsapp("<p>#{url.gsub('&', '&amp;')}</p>")).to eq(url)
+    end
+
+    it 'preserves formatting and decodes text after removing tags' do
+      expect(service.html_to_whatsapp('<p><strong>Opções</strong></p><p>A &amp; B<br>2 &lt; 3</p>'))
+        .to eq("*Opções*\n\nA & B\n2 < 3")
+    end
+
+    it 'does not run tag removal again on decoded literal text' do
+      expect(service.html_to_whatsapp('&lt;exemplo&gt;')).to eq('<exemplo>')
+    end
+  end
+
   describe '#process_response' do
     it 'keeps the provider status and a sanitized error without logging the raw body' do
       response = instance_double(
@@ -22,7 +43,8 @@ RSpec.describe Whatsapp::Providers::BaseService do
     end
 
     it 'does not retain a non-JSON provider body' do
-      response = instance_double(HTTParty::Response, success?: false, code: 503, parsed_response: '<html>private response</html>', body: '<html>private response</html>')
+      response = instance_double(HTTParty::Response, success?: false, code: 503, parsed_response: '<html>private response</html>',
+                                                     body: '<html>private response</html>')
 
       allow(Rails.logger).to receive(:error)
       service.send(:process_response, response)

@@ -17,14 +17,14 @@ module BotRuntime
     end
 
     def delegate
-      event = build_message_event
-      BotRuntime::SendEventJob.perform_later(event)
+      delivery = BotRuntime::Delivery.create_or_find_by!(message_id: @message.id, agent_bot_id: @agent_bot.id) do |record|
+        record.message_content = @message.content.to_s
+      end
+      BotRuntime::DeliverPendingEventJob.perform_later(delivery.id) unless delivery.delivered_at || delivery.skipped_at
 
-      Rails.logger.info "[BotRuntime::DelegationService] Event enqueued: " \
+      Rails.logger.info '[BotRuntime::DelegationService] Event enqueued: ' \
                         "conversation=#{@conversation.display_id} bot=#{@agent_bot.name}"
     end
-
-    private
 
     def build_message_event
       {
@@ -41,6 +41,8 @@ module BotRuntime
         metadata: build_metadata
       }
     end
+
+    private
 
     # EVO-2179: forward incoming media (image/audio/…) so the bot_runtime can pass
     # it to the AI processor as A2A file parts. Without this a media-only message
@@ -130,11 +132,26 @@ module BotRuntime
           contact: { id: contact.id, name: contact.name }
         },
         agent_bot_id: @agent_bot.id,
+        crm_delivery_context: build_delivery_context,
         agent_bot_name: @agent_bot.name,
         contactId: contact.id,
         contactName: contact.name,
         inboxId: @conversation.inbox.id,
         contact: build_contact_data(contact)
+      }
+    end
+
+    # Only CRM-persisted outbound messages can support claims of prior delivery.
+    # Failed/pending sends and private notes must never be treated as delivered.
+    def build_delivery_context
+      messages = @conversation.messages.where(message_type: :outgoing, private: false)
+                              .where(status: %i[sent delivered read])
+                              .order(created_at: :desc).limit(10)
+      {
+        version: 1,
+        conversation_id: @conversation.id.to_s,
+        captured_at: Time.current.iso8601,
+        messages: messages.reverse.map { |message| { id: message.id.to_s, content: message.content.to_s.first(8000) } }
       }
     end
 

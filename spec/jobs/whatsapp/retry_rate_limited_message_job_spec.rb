@@ -14,6 +14,8 @@ RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
   let(:message) do
     instance_double(Message,
                     id: 44,
+                    has_attribute?: true,
+                    followup_execution_id: nil,
                     content_attributes: attributes,
                     outgoing?: true,
                     private?: false,
@@ -24,7 +26,7 @@ RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
   it 'claims a matching rate-limited failed message and invokes SendReplyJob' do
     allow(described_class).to receive(:new).and_call_original
     allow(Message).to receive(:find_by).with(id: 44).and_return(message)
-    allow(message).to receive(:with_lock) { |&block| block.call }
+    allow(message).to receive(:with_lock).and_yield
     expect(message).to receive(:update!).with(
       status: :sent,
       content_attributes: {
@@ -40,7 +42,7 @@ RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
 
   it 'does not send when a manual retry or another status update made the job stale' do
     allow(Message).to receive(:find_by).with(id: 44).and_return(message)
-    allow(message).to receive(:with_lock) { |&block| block.call }
+    allow(message).to receive(:with_lock).and_yield
     allow(message).to receive(:source_id).and_return('accepted-by-provider')
 
     expect(message).not_to receive(:update!)
@@ -48,9 +50,10 @@ RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
 
     described_class.perform_now(44, 1, 'retry-token-1')
   end
+
   it 'does not send when a newer retry replaced the queued job token' do
     allow(Message).to receive(:find_by).with(id: 44).and_return(message)
-    allow(message).to receive(:with_lock) { |&block| block.call }
+    allow(message).to receive(:with_lock).and_yield
     allow(message).to receive(:content_attributes).and_return(
       attributes.merge('whatsapp_auto_retry_token' => 'newer-token')
     )
@@ -60,5 +63,4 @@ RSpec.describe Whatsapp::RetryRateLimitedMessageJob do
 
     described_class.perform_now(44, 1, 'retry-token-1')
   end
-
 end

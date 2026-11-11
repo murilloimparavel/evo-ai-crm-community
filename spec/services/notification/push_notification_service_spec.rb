@@ -45,8 +45,8 @@ RSpec.describe Notification::PushNotificationService do
       end
     end
 
-    it 'does not send to an invalid subscription' do
-      allow(subscription).to receive(:valid?).and_return(false)
+    it 'does not send to an untrusted endpoint' do
+      allow(subscription).to receive(:subscription_attributes).and_return('endpoint' => 'https://127.0.0.1/private')
       service.send(:send_browser_push, subscription)
       expect(WebPush).not_to have_received(:payload_send)
     end

@@ -11,6 +11,8 @@ RSpec.describe BotRuntime::ReplayPendingDeliveriesJob, type: :job do
   it 'reaches the 501st journal even when the oldest 500 listener evaluations repeatedly fail' do
     now = Time.current
     messages = Array.new(501) { SecureRandom.uuid }
+    # Bulk fixtures avoid callbacks so the test isolates replay fairness.
+    # rubocop:disable Rails/SkipsModelValidations
     Message.insert_all!(messages.map do |id|
       { id: id, inbox_id: inbox.id, conversation_id: conversation.id, message_type: 0,
         created_at: now, updated_at: now }
@@ -20,6 +22,7 @@ RSpec.describe BotRuntime::ReplayPendingDeliveriesJob, type: :job do
       timestamp = index < 500 ? 2.days.ago : 1.hour.ago
       { id: id, message_id: messages[index], created_at: timestamp, updated_at: timestamp, next_attempt_at: timestamp }
     end)
+    # rubocop:enable Rails/SkipsModelValidations
     queued = []
     allow(BotRuntime::ProcessMessageEventJob).to receive(:perform_later) { |id| queued << id }
     allow(BotRuntime::Config).to receive(:enabled?).and_return(true)
@@ -39,14 +42,17 @@ RSpec.describe BotRuntime::ReplayPendingDeliveriesJob, type: :job do
   end
 
   it 'reserves a page before enqueue so lost worker delivery does not monopolize every sweep' do
-    first = double(id: 'first')
-    second = double(id: 'second')
+    first = instance_double(BotRuntime::MessageEvent, id: 'first')
+    second = instance_double(BotRuntime::MessageEvent, id: 'second')
     # The database-backed 501-record test covers ordering. This checks reservation
     # commits before any external enqueue failure can interrupt the sweep.
-    relation = double('due relation')
+    relation = instance_double(ActiveRecord::Relation)
     allow(BotRuntime::MessageEvent).to receive(:due).and_return(relation)
-    allow(relation).to receive_message_chain(:order, :limit, :lock, :to_a).and_return([first, second])
-    reserved = double('reserved relation')
+    allow(relation).to receive(:order).with(:next_attempt_at, :id).and_return(relation)
+    allow(relation).to receive(:limit).with(500).and_return(relation)
+    allow(relation).to receive(:lock).with('FOR UPDATE SKIP LOCKED').and_return(relation)
+    allow(relation).to receive(:to_a).and_return([first, second])
+    reserved = instance_double(ActiveRecord::Relation)
     allow(BotRuntime::MessageEvent).to receive(:where).with(id: %w[first second]).and_return(reserved)
     expect(reserved).to receive(:update_all).with(next_attempt_at: anything).ordered
     expect(BotRuntime::ProcessMessageEventJob).to receive(:perform_later).with('first').ordered.and_raise('queue unavailable')

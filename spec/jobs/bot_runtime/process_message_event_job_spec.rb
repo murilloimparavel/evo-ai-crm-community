@@ -41,7 +41,7 @@ RSpec.describe BotRuntime::ProcessMessageEventJob, type: :job do
   end
 
   it 'does not execute moderation enabled after the message was captured' do
-    allow(inbox).to receive(:agent_bot_inbox).and_return(double(moderation_enabled?: true))
+    allow(inbox).to receive(:agent_bot_inbox).and_return(instance_double(AgentBotInbox, moderation_enabled?: true))
     expect(AgentBotListener.instance).not_to receive(:message_created)
     described_class.new.perform('journal-1')
   end

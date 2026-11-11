@@ -27,8 +27,8 @@ class Notification::TestPushNotificationJob < ApplicationJob
     origin = ENV.fetch('FRONTEND_URL', 'http://localhost:3000').delete_suffix('/')
     attributes.merge(
       message: { title: 'SOFIA Central · Teste de notificações', body: 'Este aparelho recebeu a notificação de teste.',
-                 user_id: user_id, tag: "push-test-#{job_id}", url: "#{origin}/profile/notificacoes" }.to_json,
-      vapid: { subject: origin, public_key: VapidService.public_key, private_key: VapidService.private_key },
+                 user_id: user_id, tag: "push-test-#{job_id}", url: "#{origin}/profile/notifications" }.to_json,
+      vapid: { subject: VapidService.subject, public_key: VapidService.public_key, private_key: VapidService.private_key },
       ssl_timeout: 5, open_timeout: 5, read_timeout: 5
     )
   end

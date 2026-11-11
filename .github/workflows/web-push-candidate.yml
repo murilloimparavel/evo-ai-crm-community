@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   web-push:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       RAILS_ENV: test

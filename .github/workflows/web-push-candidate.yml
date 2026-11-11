@@ -1,0 +1,65 @@
+name: Web Push production candidate
+
+on:
+  push:
+    branches: [codex/web-push-production-candidate]
+  pull_request:
+    branches: [codex/production-20261110]
+    paths:
+      - 'app/**/notification*'
+      - 'app/services/notification/**'
+      - 'lib/vapid_service.rb'
+      - 'spec/**/notification/**'
+      - 'spec/requests/api/v1/web_push_spec.rb'
+      - '.github/workflows/web-push-candidate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  web-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RAILS_ENV: test
+      ENCRYPTION_KEY: test-encryption-key-for-fernet!!
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USERNAME: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DATABASE: evolution_test
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: evolution_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.4'
+          bundler-cache: true
+      - run: bundle exec rails db:schema:load
+      - name: Test current production contracts and Web Push integration
+        run: >-
+          bundle exec rspec
+          spec/requests/api/v1/web_push_spec.rb
+          spec/jobs/notification/test_push_notification_job_spec.rb
+          spec/services/notification/push_notification_service_web_push_spec.rb
+          spec/services/notification/push_notification_service_spec.rb

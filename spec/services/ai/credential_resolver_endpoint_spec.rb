@@ -60,14 +60,23 @@ RSpec.describe Ai::CredentialResolver, '.resolve_endpoint' do
     expect(described_class.resolve_endpoint(for_consumer: :inbox_assist).base_url).to be_nil
   end
 
+  it 'uses the OpenRouter endpoint default for an OpenRouter credential' do
+    register(scope: 'installation', provider: 'openrouter')
+
+    endpoint = described_class.resolve_endpoint(for_consumer: :inbox_assist)
+
+    expect(endpoint.provider).to eq('openrouter')
+    expect(endpoint.base_url).to eq('https://openrouter.ai/api/v1')
+  end
+
   it 'returns the winning provider with its key and endpoint' do
     register(scope: 'installation', provider: 'openai')
     register(scope: 'account', provider: 'openrouter')
 
-    endpoint = described_class.resolve_endpoint(for_consumer: :audio_transcription)
+    endpoint = described_class.resolve_endpoint(for_consumer: :inbox_assist)
 
     expect(endpoint.provider).to eq('openrouter')
-    expect(endpoint.base_url).to be_nil
+    expect(endpoint.base_url).to eq('https://openrouter.ai/api/v1')
   end
 
   # The half that was broken: the winning credential decides BOTH halves. An

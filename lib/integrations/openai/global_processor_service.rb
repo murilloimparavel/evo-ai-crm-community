@@ -1,3 +1,6 @@
+require 'socket'
+require 'timeout'
+
 class Integrations::Openai::GlobalProcessorService
   include ActiveModel::Model
 
@@ -12,9 +15,10 @@ class Integrations::Openai::GlobalProcessorService
 
   def perform
     return nil unless valid_event_name?
-    return nil unless global_config_available?
+    return configuration_error unless global_config_available?
 
     result = send("#{event_name}_message")
+    return result if result.is_a?(Hash) && result[:error].present?
 
     # For analyze_sentiment, wrap result in message format for consistency
     if event_name == 'analyze_sentiment' && result.is_a?(Hash)
@@ -38,10 +42,22 @@ class Integrations::Openai::GlobalProcessorService
     api_url.present? && api_key.present? && gpt_model.present?
   end
 
+  def configuration_error
+    message = if api_key.blank?
+                'Credencial de IA não configurada.'
+              elsif api_url.blank?
+                'Endpoint de IA não configurado.'
+              else
+                'Modelo de IA não configurado.'
+              end
+
+    { error: { message: message }, error_code: 503 }
+  end
+
   # Endpoint from the same credential as the key: mixing halves points a valid
   # key at the wrong server.
   def api_url
-    @api_url ||= credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', nil)
+    @api_url ||= (credential_endpoint.base_url.presence || GlobalConfigService.load('OPENAI_API_URL', nil))&.chomp('/')
   end
 
   # The registry is the single source; the pre-registry global/hook chain is the
@@ -51,11 +67,21 @@ class Integrations::Openai::GlobalProcessorService
   end
 
   def credential_endpoint
-    @credential_endpoint ||= Ai::CredentialResolver.resolve_endpoint(for_consumer: :inbox_assist)
+    @credential_endpoint ||= Ai::CredentialResolver.resolve_endpoint(for_consumer: credential_consumer)
+  end
+
+  # Sentiment analysis is used by moderation, which OpenRouter is not approved
+  # for. Keep it on the moderation credential path.
+  def credential_consumer
+    event_name == 'analyze_sentiment' ? :moderation : :inbox_assist
   end
 
   def gpt_model
-    @gpt_model ||= GlobalConfigService.load('OPENAI_MODEL', 'gpt-4.1-nano')
+    @gpt_model ||= Ai::ModelResolver.resolve(
+      GlobalConfigService.load('OPENAI_MODEL', 'gpt-4.1-nano'),
+      provider: credential_endpoint.provider,
+      openrouter_model: GlobalConfigService.load('OPENROUTER_MODEL', Ai::ModelResolver::OPENROUTER_DEFAULT_MODEL)
+    )
   end
 
   def conversation
@@ -124,24 +150,41 @@ class Integrations::Openai::GlobalProcessorService
   end
 
   def make_api_call(body)
-    full_api_url = api_url.end_with?('/chat/completions') ? api_url : "#{api_url}/chat/completions"
+    provider = credential_endpoint.provider.presence || 'legacy'
+    Rails.logger.info("OpenAI Global API request provider=#{provider} model=#{gpt_model}")
+    response = HTTParty.post(chat_completions_url, headers: api_headers, body: body)
+    Rails.logger.info("OpenAI Global API response provider=#{provider} status=#{response.code}")
 
-    headers = {
+    provider_result(response)
+  rescue JSON::ParserError
+    { error: { message: 'O provedor de IA retornou uma resposta inválida.' }, error_code: 502 }
+  rescue HTTParty::Error, SocketError, Timeout::Error => e
+    Rails.logger.warn("OpenAI Global API transport failure provider=#{provider} error=#{e.class}")
+    { error: { message: 'Não foi possível conectar ao provedor de IA.' }, error_code: 502 }
+  end
+
+  def provider_error(status)
+    { error: { message: 'O provedor de IA recusou a solicitação.' }, error_code: status }
+  end
+
+  def chat_completions_url
+    api_url.end_with?('/chat/completions') ? api_url : "#{api_url}/chat/completions"
+  end
+
+  def api_headers
+    {
       'Content-Type' => 'application/json',
       'Authorization' => "Bearer #{api_key}"
     }
+  end
 
-    Rails.logger.info("OpenAI Global API request to #{full_api_url}: #{body}")
-    response = HTTParty.post(full_api_url, headers: headers, body: body)
-    Rails.logger.info("OpenAI Global API response: #{response.body}")
+  def provider_result(response)
+    return provider_error(response.code) unless response.success?
 
-    return { error: response.parsed_response, error_code: response.code } unless response.success?
+    content = JSON.parse(response.body).dig('choices', 0, 'message', 'content')
+    return { message: content } if content.present?
 
-    choices = JSON.parse(response.body)['choices']
-
-    return { message: choices.first['message']['content'] } if choices.present?
-
-    { message: nil }
+    { error: { message: 'O provedor de IA retornou uma resposta vazia.' }, error_code: response.code }
   end
 
   def rephrase_message
@@ -185,30 +228,31 @@ class Integrations::Openai::GlobalProcessorService
   end
 
   def analyze_sentiment_message
-    # Public method to analyze sentiment of a comment
-    # Can be called directly without event structure
     result = make_api_call(build_api_call_body(get_prompt('analyze_sentiment'), event['data']['content']))
+    return result if provider_error?(result)
 
-    # Parse JSON response from OpenAI
-    if result[:message].present?
-      begin
-        parsed = JSON.parse(result[:message])
-        {
-          offensive: parsed['offensive'] == true,
-          confidence: (parsed['confidence'] || 0.0).to_f,
-          reason: parsed['reason']
-        }
-      rescue JSON::ParserError
-        # Fallback: try to extract from string
-        {
-          offensive: result[:message].downcase.include?('"offensive": true') || result[:message].downcase.include?('offensive: true'),
-          confidence: 0.5,
-          reason: result[:message]
-        }
-      end
-    else
-      { offensive: false, confidence: 0.0, reason: 'No response from AI' }
-    end
+    parse_sentiment(result[:message])
+  end
+
+  def provider_error?(result)
+    result.is_a?(Hash) && result[:error].present?
+  end
+
+  def parse_sentiment(message)
+    return { offensive: false, confidence: 0.0, reason: 'No response from AI' } if message.blank?
+
+    parsed = JSON.parse(message)
+    {
+      offensive: parsed['offensive'] == true,
+      confidence: (parsed['confidence'] || 0.0).to_f,
+      reason: parsed['reason']
+    }
+  rescue JSON::ParserError
+    {
+      offensive: message.downcase.include?('"offensive": true') || message.downcase.include?('offensive: true'),
+      confidence: 0.5,
+      reason: message
+    }
   end
 
   def generate_prompt_message

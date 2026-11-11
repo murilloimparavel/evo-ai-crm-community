@@ -9,7 +9,8 @@ module BotRuntime
       # cannot monopolize the oldest-created page on every sweep.
       ids = MessageEvent.transaction do
         events = MessageEvent.due.order(:next_attempt_at, :id).limit(500).lock('FOR UPDATE SKIP LOCKED').to_a
-        MessageEvent.where(id: events.map(&:id)).update_all(next_attempt_at: 5.minutes.from_now)
+        # Atomic reservation must avoid per-record callbacks under the page lock.
+        MessageEvent.where(id: events.map(&:id)).update_all(next_attempt_at: 5.minutes.from_now) # rubocop:disable Rails/SkipsModelValidations
         events.map(&:id)
       end
       ids.each do |id|

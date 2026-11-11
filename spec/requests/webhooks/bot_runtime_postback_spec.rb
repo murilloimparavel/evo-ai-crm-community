@@ -19,8 +19,8 @@ RSpec.describe 'Bot Runtime postback handoff marker', type: :request do
   end
 
   context 'with a stable runtime delivery ID' do
-    let(:messages) { double('messages') }
-    let(:scoped_messages) { double('scoped messages') }
+    let(:messages) { instance_double(ActiveRecord::Relation) }
+    let(:scoped_messages) { instance_double(ActiveRecord::Relation) }
     let(:existing_reply) { nil }
 
     before do

@@ -4,7 +4,7 @@ on:
   push:
     branches: [codex/web-push-production-candidate]
   pull_request:
-    branches: [codex/production-20261110]
+    branches: [main, codex/production-20261110]
     paths:
       - 'app/**/notification*'
       - 'app/services/notification/**'

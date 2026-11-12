@@ -684,7 +684,7 @@ GEM
     os (1.1.4)
     ostruct (0.6.3)
     parallel (1.27.0)
-    parser (3.3.8.0)
+    parser (3.3.13.0)
       ast (~> 2.4.1)
       racc
     pg (1.5.3)
@@ -873,7 +873,7 @@ GEM
     sass-listen (4.0.0)
       rb-fsevent (~> 0.9, >= 0.9.4)
       rb-inotify (~> 0.9, >= 0.9.7)
-    scout_apm (5.3.3)
+    scout_apm (5.8.0)
       parser
     scss_lint (0.60.0)
       sass (~> 3.5, >= 3.5.5)
@@ -1123,7 +1123,7 @@ DEPENDENCIES
   rubocop-rails
   rubocop-rspec
   rubyzip (~> 3.4)
-  scout_apm
+  scout_apm (~> 5.8.0)
   scss_lint
   seed_dump
   sendgrid-ruby (~> 6.7)

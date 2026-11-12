@@ -1,10 +1,10 @@
 source 'https://rubygems.org'
 
-ruby '3.4.4'
+ruby '~> 3.4.0'
 
 ##-- base gems for rails --##
 gem 'rack-cors', '2.0.0', require: 'rack/cors'
-gem 'rails', '~> 7.1'
+gem 'rails', '~> 8.1.4.1'
 # Reduces boot times through caching; required in config/boot.rb
 gem 'bootsnap', require: false
 
@@ -29,7 +29,7 @@ gem 'haikunator'
 # Template parsing safely
 gem 'liquid'
 # Parse Markdown to HTML
-gem 'commonmarker'
+gem 'commonmarker', '0.23.10'
 # Validate Data against JSON Schema
 gem 'json_schemer'
 # Rack middleware for blocking & throttling abusive requests
@@ -59,7 +59,7 @@ gem 'image_processing'
 ##-- gems for database --#
 gem 'groupdate'
 gem 'pg'
-gem 'redis'
+gem 'redis', '~> 5.4'
 gem 'redis-namespace'
 # super fast record imports in bulk
 gem 'activerecord-import'

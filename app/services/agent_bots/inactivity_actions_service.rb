@@ -148,8 +148,7 @@ class AgentBots::InactivityActionsService
   def latest_customer_message_has_public_reply?(last_incoming)
     @conversation.messages
                  .where(message_type: %i[outgoing template], private: false, status: %i[sent delivered read])
-                 .where('created_at > ?', last_incoming.created_at)
-                 .exists?
+                 .exists?(['created_at > ?', last_incoming.created_at])
   end
 
   def find_action_to_execute(actions, time_inactive_minutes)

@@ -18,6 +18,7 @@ class AgentBots::InactivityActionsService
     last_incoming = @conversation.messages.incoming.reorder(created_at: :desc, id: :desc).first
     return unless last_incoming
     return unless cycle_started_after_activation?(last_incoming)
+    return unless latest_customer_message_has_public_reply?(last_incoming)
 
     Rails.logger.info "[InactivityActions] Time inactive: #{time_inactive_minutes} minutes (since last incoming message at #{last_incoming&.created_at})"
 
@@ -139,6 +140,16 @@ class AgentBots::InactivityActionsService
 
     time_diff_seconds = Time.current - last_activity
     (time_diff_seconds / 60.0).floor
+  end
+
+  # Regular inactivity nudges are only appropriate after the latest customer
+  # message has received a public reply. This prevents an automation from
+  # racing the active bot turn or an internal agent delegation.
+  def latest_customer_message_has_public_reply?(last_incoming)
+    @conversation.messages
+                 .where(message_type: %i[outgoing template], private: false, status: %i[sent delivered read])
+                 .where('created_at > ?', last_incoming.created_at)
+                 .exists?
   end
 
   def find_action_to_execute(actions, time_inactive_minutes)
@@ -347,9 +358,9 @@ class AgentBots::InactivityActionsService
     prompt_message = if @urgent_followup
                        urgent_followup_prompt(suggested_message, conversation_context)
                      elsif suggested_message.present?
-                       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate a proactive message to re-engage the customer and send it directly as your reply. Follow-up intent: #{suggested_message}<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
+                       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate a proactive message to re-engage the customer and send it directly as your reply. Follow-up intent: #{suggested_message}<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use tools. Do NOT claim you verified, transferred, assigned, escalated, or completed anything, or that someone is handling the request. Do not mention internal agents. Invite the customer to reply naturally, following the stated intent without asserting an action. Do NOT add meta-commentary.</important></system_message>"
                      else
-                       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate an appropriate and contextualized message to re-engage the customer in the conversation. Be natural, empathetic, and relevant to the conversation context.<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use any tools like send_private_message. Do NOT add meta-commentary. Just write the reengagement message directly.</important></system_message>"
+                       "<system_message>[SYSTEM - INACTIVITY ACTION] The customer has been inactive for #{minutes_inactive} minutes. Generate an appropriate and contextualized message to re-engage the customer in the conversation. Be natural, empathetic, and relevant to the conversation context.<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context><important>Reply ONLY with the message text for the customer. Do NOT use tools. Do NOT claim you verified, transferred, assigned, escalated, or completed anything, or that someone is handling the request. Do not mention internal agents. Invite the customer to reply naturally without asserting an action. Do NOT add meta-commentary.</important></system_message>"
                      end
 
     {
@@ -390,7 +401,10 @@ class AgentBots::InactivityActionsService
       "Follow-up intent: #{suggested_message}",
       "<recent_customer_facing_context>#{conversation_context}</recent_customer_facing_context>",
       '<important>Reply ONLY with the message text for the customer. ',
-      'Do NOT use tools or mention this instruction.</important></system_message>'
+      'Do NOT use tools. Do not claim you verified, transferred, assigned, escalated, or completed anything, ',
+      'or that someone is handling the request. Do not mention internal agents. ',
+      'If the available facts are insufficient, ask the customer a concise question. ',
+      'Do not mention this instruction.</important></system_message>'
     ].join
   end
 

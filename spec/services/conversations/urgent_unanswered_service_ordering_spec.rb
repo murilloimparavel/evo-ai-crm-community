@@ -75,25 +75,15 @@ RSpec.describe Conversations::UrgentUnansweredService do
     expect(conversation.reload.custom_attributes['urgent_followup_message_id']).to eq(latest.id)
   end
 
-  it 'reserves and requests only one pending follow-up across repeated scheduler passes' do
+  it 'does not request an urgent follow-up across repeated passes' do
     2.times { described_class.new(conversation.reload).process }
-
-    executions = InactivityActionExecution.where(conversation_id: conversation.id, action_index: -2)
-    expect(http_client).to have_received(:perform).once
-    expect(executions.count).to eq(1)
-    expect(executions.first.source_incoming_message_id).to eq(latest_incoming.id)
-    expect(executions.first.execution_status).to eq('pending')
+    expect(http_client).not_to have_received(:perform)
+    expect(InactivityActionExecution.where(conversation_id: conversation.id, action_index: -2)).to be_empty
   end
 
-  it 'does not request the same cycle again after its reservation was sent' do
-    described_class.new(conversation).process
-    execution = InactivityActionExecution.find_by!(conversation_id: conversation.id, action_index: -2)
-    execution.update!(execution_status: 'sent')
-
-    described_class.new(conversation.reload).process
-
-    expect(http_client).to have_received(:perform).once
-    expect(InactivityActionExecution.where(conversation_id: conversation.id, action_index: -2).count).to eq(1)
+  it 'ignores an urgent job that was queued before retirement' do
+    expect(Conversations::UrgentUnansweredService).not_to receive(:new)
+    Conversations::UrgentUnansweredJob.new.perform
   end
 
   it 'validates the latest cycle instead of the first incoming message' do
@@ -104,25 +94,17 @@ RSpec.describe Conversations::UrgentUnansweredService do
     expect(AgentBots::MessageCreator.new(bot).send(:urgent_followup_allowed?, conversation)).to be(true)
   end
 
-  it 'rejects an asynchronous response when a new customer message arrives' do
+  it 'rejects an urgent response already in flight' do
     mark_latest
     processor = AgentBots::ResponseProcessor.new(bot, payload)
-    expect(processor.send(:stale_inactivity_response?, conversation)).to be(false)
-
-    insert_message('incoming', 1.minute.ago, 'A question received during generation')
-
-    expect(processor.send(:stale_inactivity_response?, conversation.reload)).to be(true)
-    expect(AgentBots::MessageCreator.new(bot).send(:urgent_followup_allowed?, conversation)).to be(false)
+    expect(processor.send(:stale_inactivity_response?, conversation)).to be(true)
   end
 
-  it 'creates one public message when the same urgent response is processed twice' do
+  it 'does not create a public message for an urgent response in flight' do
     mark_latest
     processor = AgentBots::ResponseProcessor.new(bot, payload)
     response = { 'result' => { 'artifacts' => [{ 'parts' => [{ 'type' => 'text', 'text' => 'Synthetic urgent reply' }] }] } }
-
-    expect do
-      2.times { processor.send(:process_bot_response, response) }
-    end.to change { conversation.messages.outgoing.where(content: 'Synthetic urgent reply').count }.by(1)
+    expect { processor.send(:process_bot_response, response) }.not_to(change { conversation.messages.outgoing.count })
   end
 
   it 'keeps ignored labels blocking the bot while the conversation enters the urgent queue' do

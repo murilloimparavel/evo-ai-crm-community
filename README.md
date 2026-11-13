@@ -28,7 +28,7 @@
 
 ## About
 
-**Evo CRM Backend** is the core API of the Evo CRM Community customer support platform. Built with Ruby on Rails 7.1 (API mode), it manages conversations, contacts, messages, inboxes, and integrations across multiple communication channels (WhatsApp, Email, Web Widget, and more).
+**Evo CRM Backend** is the core API of the Evo CRM Community customer support platform. Built with Ruby on Rails 8.0 (API mode), it manages conversations, contacts, messages, inboxes, and integrations across multiple communication channels (WhatsApp, Email, Web Widget, and more).
 
 It exposes a comprehensive RESTful API and supports real-time messaging via ActionCable WebSockets.
 
@@ -50,8 +50,8 @@ RBAC seeds three roles: `agent` (attendance only), `account_owner` (the whole ca
 
 | Component | Technology |
 |---|---|
-| Backend | Ruby on Rails 7.1 (API mode) |
-| Ruby | 3.4.4 |
+| Backend | Ruby on Rails 8.0 (API mode) |
+| Ruby | 3.4.12 |
 | Database | PostgreSQL |
 | Cache & Jobs | Redis + Sidekiq |
 | Real-time | ActionCable (WebSocket) |
@@ -64,7 +64,7 @@ RBAC seeds three roles: `agent` (attendance only), `account_owner` (the whole ca
 
 ### Prerequisites
 
-- **Ruby** 3.4.4
+- **Ruby** 3.4.12
 - **PostgreSQL** 12+
 - **Redis** 6+
 - **pnpm** (optional, for convenience scripts)

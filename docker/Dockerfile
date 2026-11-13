@@ -1,8 +1,8 @@
 # pre-build stage
-FROM node:23-alpine AS node
-FROM ruby:3.4.4-alpine3.21 AS pre-builder
+FROM node:24.22.3-alpine3.24 AS node
+FROM ruby:3.4.12-alpine3.24 AS pre-builder
 
-ARG NODE_VERSION="23.7.0"
+ARG NODE_VERSION="24.22.3"
 ARG PNPM_VERSION="10.2.0"
 ENV NODE_VERSION=${NODE_VERSION}
 ENV PNPM_VERSION=${PNPM_VERSION}
@@ -24,7 +24,7 @@ ENV NODE_OPTIONS=${NODE_OPTIONS}
 
 ENV BUNDLE_PATH="/gems"
 
-RUN apk update && apk add --no-cache \
+RUN apk upgrade --no-cache && apk add --no-cache \
   openssl \
   tar \
   build-base \
@@ -64,7 +64,7 @@ COPY spec/support/extension_consumer_stub spec/support/extension_consumer_stub
 
 # adding xz as nokogiri was failing to build libxml
 # https://github.com/evolution/evolution/issues/4045
-RUN apk update && apk add --no-cache build-base musl ruby-full ruby-dev gcc make musl-dev openssl openssl-dev g++ linux-headers xz vips
+RUN apk update && apk add --no-cache build-base musl ruby-full ruby-dev gcc make musl-dev openssl openssl-dev g++ linux-headers xz vips yaml-dev
 RUN bundle config set --local force_ruby_platform true
 
 # Do not install development or test gems in production
@@ -103,9 +103,9 @@ RUN rm -rf /gems/ruby/3.4.0/cache/*.gem \
   && rm .gitignore
 
 # final build stage
-FROM ruby:3.4.4-alpine3.21
+FROM ruby:3.4.12-alpine3.24
 
-ARG NODE_VERSION="23.7.0"
+ARG NODE_VERSION="24.22.3"
 ARG PNPM_VERSION="10.2.0"
 ENV NODE_VERSION=${NODE_VERSION}
 ENV PNPM_VERSION=${PNPM_VERSION}
@@ -127,8 +127,7 @@ ARG RAILS_ENV=production
 ENV RAILS_ENV=${RAILS_ENV}
 ENV BUNDLE_PATH="/gems"
 
-RUN apk update && apk add --no-cache \
-  build-base \
+RUN apk upgrade --no-cache && apk add --no-cache \
   openssl \
   tzdata \
   postgresql-client \
@@ -142,12 +141,14 @@ RUN apk update && apk add --no-cache \
 COPY --from=node /usr/local/bin/node /usr/local/bin/
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 
-RUN if [ "$RAILS_ENV" != "production" ]; then \
-  apk add --no-cache curl \
-  && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-  && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-  && npm install -g pnpm@${PNPM_VERSION} \
-  && pnpm --version; \
+RUN if [ "$RAILS_ENV" = "production" ]; then \
+  rm -rf /usr/local/lib/node_modules /usr/local/bin/node; \
+  else \
+    apk add --no-cache curl \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && npm install -g pnpm@${PNPM_VERSION} \
+    && pnpm --version; \
   fi
 
 COPY --from=pre-builder /gems/ /gems/

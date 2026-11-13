@@ -37,7 +37,7 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.4.4'
+          ruby-version: '3.4.12'
           bundler-cache: true
 
       - name: Run RuboCop
@@ -152,7 +152,7 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.4.4'
+          ruby-version: '3.4.12'
           bundler-cache: true
 
       - name: Run full RSpec suite against base and PR head

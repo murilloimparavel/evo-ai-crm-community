@@ -1,10 +1,10 @@
 source 'https://rubygems.org'
 
-ruby '3.4.4'
+ruby '~> 3.4.0'
 
 ##-- base gems for rails --##
 gem 'rack-cors', '2.0.0', require: 'rack/cors'
-gem 'rails', '~> 7.1'
+gem 'rails', '~> 8.0.5'
 # Reduces boot times through caching; required in config/boot.rb
 gem 'bootsnap', require: false
 
@@ -13,7 +13,7 @@ gem 'acts-as-taggable-on'
 gem 'attr_extras'
 gem 'browser'
 gem 'hashie'
-gem 'jbuilder'
+gem 'jbuilder', '~> 2.15'
 gem 'kaminari'
 gem 'responders', '>= 3.1.1'
 gem 'rest-client'
@@ -30,6 +30,8 @@ gem 'haikunator'
 gem 'liquid'
 # Parse Markdown to HTML
 gem 'commonmarker'
+gem 'msgpack', '>= 1.8.2'
+gem 'rexml', '>= 3.4.2'
 # Validate Data against JSON Schema
 gem 'json_schemer'
 # Rack middleware for blocking & throttling abusive requests
@@ -38,18 +40,19 @@ gem 'rack-attack', '>= 6.7.0'
 gem 'down'
 # authentication type to fetch and send mail over oauth2.0
 gem 'gmail_xoauth'
+gem 'oauth', '>= 1.1.6'
 # Lock net-smtp to 0.3.4 to avoid issues with gmail_xoauth2
 gem 'net-smtp', '~> 0.3.4'
 # Prevent CSV injection
 gem 'csv-safe'
 # Read/write ZIP bundles for the templates feature
-gem 'rubyzip', '~> 2.3'
+gem 'rubyzip', '~> 3.4'
 
 ##-- MCP (Model Context Protocol) Integration --##
 # gem 'fast-mcp', '~> 1.5.0'  # Removed - MCP not needed
 
 ##-- for active storage --##
-gem 'aws-sdk-s3', require: false
+gem 'aws-sdk-s3', '>= 1.208.0', require: false
 # original gem isn't maintained actively
 # we wanted updated version of faraday which is a dependency for slack-ruby-client
 gem 'azure-storage-blob', git: 'https://github.com/chatwoot/azure-storage-ruby', branch: 'chatwoot', require: false
@@ -75,7 +78,7 @@ gem 'barnes'
 gem 'prometheus-client'
 
 # authorization
-gem 'jwt'
+gem 'jwt', '~> 2.10.3'
 gem 'pundit'
 # Multi-factor authentication
 gem 'rotp', '~> 6.3'
@@ -111,15 +114,15 @@ gem 'ddtrace', require: false
 gem 'elastic-apm', require: false
 gem 'newrelic_rpm', require: false
 gem 'newrelic-sidekiq-metrics', '>= 1.6.2', require: false
-gem 'scout_apm', require: false
+gem 'scout_apm', '~> 5.8.0', require: false
 gem 'sentry-rails', '>= 5.19.0', require: false
 gem 'sentry-ruby', require: false
 gem 'sentry-sidekiq', '>= 5.19.0', require: false
 
 ##-- background job processing --##
-gem 'sidekiq', '>= 7.3.1'
+gem 'sidekiq', '~> 7.3.1'
 # We want cron jobs
-gem 'sidekiq-cron', '>= 1.12.0'
+gem 'sidekiq-cron', '>= 2.4.0'
 
 ##-- Push notification service --##
 gem 'fcm'
@@ -159,6 +162,7 @@ gem 'lograge', '~> 0.14.0', require: false
 
 # worked with microsoft refresh token
 gem 'omniauth-oauth2'
+gem 'oauth2', '>= 2.0.22'
 
 
 # need for google auth

@@ -68,22 +68,8 @@ RSpec.describe AgentBots::InactivityActionsService do
 
     before { allow(cadence).to receive(:current_for_followup_cycle?).with(incoming).and_return(true) }
 
-    it 'defers urgent automation while a normal step is pending' do
-      normal = cadence.send(:reserve_execution, action, 0, 'interact', incoming)
-      cadence.instance_variable_set(:@urgent_followup, true)
-
-      expect(cadence.send(:reserve_execution, action, -2, 'interact', incoming)).to be_nil
-      expect(normal.execution_status).to eq('pending')
-    end
-
-    it 'defers normal automation while urgent owns the cycle, then resumes after failure' do
-      cadence.instance_variable_set(:@urgent_followup, true)
-      urgent = cadence.send(:reserve_execution, action, -2, 'interact', incoming)
-      cadence.instance_variable_set(:@urgent_followup, false)
-
-      expect(cadence.send(:reserve_execution, action, 0, 'interact', incoming)).to be_nil
-
-      urgent.update!(execution_status: 'failed')
+    it 'allows a configured action when an old urgent execution is pending' do
+      cadence.send(:reserve_execution, action, -2, 'interact', incoming)
       expect(cadence.send(:reserve_execution, action, 0, 'interact', incoming)).to be_present
     end
   end

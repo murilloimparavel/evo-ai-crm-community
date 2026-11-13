@@ -133,7 +133,7 @@ class AgentBots::ResponseProcessor
     source_id = metadata[:source_incoming_message_id] || metadata['source_incoming_message_id']
     latest_incoming = conversation.messages.incoming.reorder(created_at: :desc, id: :desc).first
     return true if source_id.blank? || latest_incoming&.id.to_s != source_id.to_s
-    return true if !urgent_followup? && conversation.custom_attributes&.dig('urgent_followup') == true
+    return true if urgent_followup? # Discard urgent replies already in flight when the feature was disabled.
     return true if conversation.assignee_id.present? && !urgent_followup?
     return true if urgent_followup? && stale_urgent_followup?(conversation, latest_incoming, source_id)
 

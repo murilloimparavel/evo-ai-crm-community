@@ -36,30 +36,9 @@ class AgentBots::InactivityActionsService
 
   # rubocop:enable Metrics/AbcSize
 
-  # The urgent queue uses its own reserved step, leaving the configured
-  # inactivity cadence untouched. A repeated scheduler pass reconciles a
-  # pending execution rather than sending a second message.
-  def process_urgent_followup(source_message)
-    return unless @agent_bot.evo_ai_provider?
-
-    @urgent_followup = true
-    return unless current_for_followup_cycle?(source_message)
-
-    InactivityActionExecution.for_conversation(@conversation.id)
-                             .where(action_index: -2)
-                             .where.not(source_incoming_message_id: source_message.id)
-                             .delete_all
-    return if InactivityActionExecution.action_executed?(@conversation.id, -2)
-
-    pending = InactivityActionExecution.for_conversation(@conversation.id)
-                                       .pending.find_by(action_index: -2)
-    if pending
-      process_pending_execution(pending, source_message)
-    else
-      action = { 'action' => 'interact', 'minutes' => 2,
-                 'intent' => 'Retome a conversa de forma breve e contextual. Responda à última dúvida do cliente e ofereça o próximo passo útil.' }
-      execute_action({ config: action, index: -2 }, source_message)
-    end
+  # Retain the entry point for queued callers while urgent automation is retired.
+  def process_urgent_followup(_source_message)
+    nil
   end
 
   private
@@ -457,20 +436,13 @@ class AgentBots::InactivityActionsService
   end
 
   def reserve_execution(action_config, action_index, action_type, last_incoming)
-    # Both schedulers reserve under the same conversation lock. A normal
-    # reservation wins if it already exists; otherwise the urgent reservation
-    # owns this customer-message cycle until it sends or fails.
+    # Serialize configured follow-up reservations for this conversation.
     @conversation.with_lock do
       next unless current_for_followup_cycle?(last_incoming)
 
-      executions = InactivityActionExecution.for_conversation(@conversation.id)
-      executions = executions.where(source_incoming_message_id: last_incoming.id)
-      blocked = if action_index == -2
-                  executions.pending.where.not(action_index: -2).exists?
-                else
-                  executions.exists?(action_index: -2, execution_status: %w[pending sent])
-                end
-      next if blocked
+      # A previously sent urgent response already covered this customer turn.
+      next if InactivityActionExecution.for_conversation(@conversation.id)
+                                       .exists?(source_incoming_message_id: last_incoming.id, action_index: -2, execution_status: 'sent')
 
       InactivityActionExecution.create!(
         conversation_id: @conversation.id,

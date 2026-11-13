@@ -72,7 +72,6 @@ RSpec.describe AgentBots::InactivityActionsService do
       cadence.send(:reserve_execution, action, -2, 'interact', incoming)
       expect(cadence.send(:reserve_execution, action, 0, 'interact', incoming)).to be_present
     end
-
   end
 
   describe '#cycle_started_after_activation?' do

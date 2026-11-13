@@ -82,7 +82,7 @@ RSpec.describe Conversations::UrgentUnansweredService do
   end
 
   it 'ignores an urgent job that was queued before retirement' do
-    expect(Conversations::UrgentUnansweredService).not_to receive(:new)
+    expect(described_class).not_to receive(:new)
     Conversations::UrgentUnansweredJob.new.perform
   end
 

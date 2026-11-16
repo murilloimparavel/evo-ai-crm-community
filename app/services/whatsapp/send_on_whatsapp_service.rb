@@ -16,10 +16,27 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     end
   end
 
+  def cloud_template_required_without_explicit_template?
+    channel.provider == 'whatsapp_cloud' && template_params.blank? && !message.conversation.can_reply?
+  end
+
   def send_template_message
+    if cloud_template_required_without_explicit_template?
+      handle_send_result(
+        nil,
+        channel.provider_service,
+        'WhatsApp Cloud requires an approved template outside the 24-hour messaging window'
+      )
+      return
+    end
+
+    send_approved_template_message
+  end
+
+  def send_approved_template_message
     name, namespace, lang_code, processed_parameters = processable_channel_message_template
 
-    return if name.blank?
+    return if handle_missing_template_name(name)
 
     if channel.provider == 'whatsapp_cloud'
       template_record = channel.message_templates.active.find_by(name: name, language: lang_code)
@@ -48,6 +65,19 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
                                         })
 
     handle_send_result(message_id, provider, 'Template delivery failed: provider returned an error response')
+  end
+
+  def handle_missing_template_name(name)
+    return false if name.present?
+
+    if channel.provider == 'whatsapp_cloud'
+      handle_send_result(
+        nil,
+        channel.provider_service,
+        'No approved WhatsApp Cloud template was selected or matched'
+      )
+    end
+    true
   end
 
   def processable_channel_message_template

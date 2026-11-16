@@ -14,6 +14,19 @@ class Conversations::MessageWindowService
     last_message_in_messaging_window?(messaging_window)
   end
 
+  # Exposes the server-calculated deadline so clients can update the composer
+  # when the window expires without relying on another conversation event.
+  # A nil deadline means the channel has no timed messaging restriction or no
+  # incoming message has opened a window yet.
+  def reply_window_expires_at
+    return if Rails.env.development?
+
+    window = messaging_window
+    return if window.blank?
+
+    last_incoming_message&.created_at&.+(window)
+  end
+
   private
 
   def messaging_window

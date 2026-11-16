@@ -8,8 +8,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
   def push_data(include_labels_data: true)
     {
       additional_attributes: additional_attributes,
-      can_reply: can_reply?,
-      reply_window_expires_at: Conversations::MessageWindowService.new(__getobj__).reply_window_expires_at&.iso8601,
+      **reply_window_payload,
       channel: inbox.try(:channel_type),
       contact_inbox: push_contact_inbox,
       id: id.to_s,
@@ -32,6 +31,14 @@ class Conversations::EventDataPresenter < SimpleDelegator
   end
 
   private
+
+  def reply_window_payload
+    window = Conversations::MessageWindowService.new(__getobj__)
+    {
+      can_reply: window.can_reply?,
+      reply_window_expires_at: window.reply_window_expires_at&.iso8601
+    }
+  end
 
   # `labels` stays a list of titles: the same hash is the webhook body, so changing
   # its type is a silent breaking change. A tag resolving to no Label row is dropped,

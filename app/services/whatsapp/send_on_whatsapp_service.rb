@@ -16,8 +16,12 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
     end
   end
 
+  def cloud_template_required_without_explicit_template?
+    channel.provider == 'whatsapp_cloud' && template_params.blank? && !message.conversation.can_reply?
+  end
+
   def send_template_message
-    if channel.provider == 'whatsapp_cloud' && template_params.blank? && !message.conversation.can_reply?
+    if cloud_template_required_without_explicit_template?
       handle_send_result(
         nil,
         channel.provider_service,

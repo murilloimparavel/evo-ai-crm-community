@@ -43,8 +43,9 @@ RSpec.describe ActionCableListener do
     it 'includes the current reply-window state in the conversation payload' do
       expires_at = Time.zone.parse('2026-11-17 12:00:00 UTC')
       allow(conversation).to receive(:can_reply?).and_return(false)
-      allow(Conversations::MessageWindowService).to receive(:new).with(conversation)
-        .and_return(instance_double(Conversations::MessageWindowService, reply_window_expires_at: expires_at))
+      allow(Conversations::MessageWindowService).to receive(:new).with(conversation).and_return(
+        instance_double(Conversations::MessageWindowService, reply_window_expires_at: expires_at)
+      )
       payload = nil
       allow(ActionCableBroadcastJob).to receive(:perform_later) do |_tokens, _event, data|
         payload = data

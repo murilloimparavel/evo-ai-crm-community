@@ -218,6 +218,8 @@ class Message < ApplicationRecord
       assignee_id: conversation.assignee_id,
       unread_count: conversation.unread_incoming_messages_count,
       last_activity_at: conversation.last_activity_at.to_i,
+      can_reply: conversation.can_reply?,
+      reply_window_expires_at: Conversations::MessageWindowService.new(conversation).reply_window_expires_at&.iso8601,
       contact_inbox: conversation.contact_inbox.present? ? { source_id: masked_source_id } : {}
     }
   end

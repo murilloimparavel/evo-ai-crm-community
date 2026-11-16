@@ -9,6 +9,7 @@ class Conversations::EventDataPresenter < SimpleDelegator
     {
       additional_attributes: additional_attributes,
       can_reply: can_reply?,
+      reply_window_expires_at: Conversations::MessageWindowService.new(__getobj__).reply_window_expires_at&.iso8601,
       channel: inbox.try(:channel_type),
       contact_inbox: push_contact_inbox,
       id: id.to_s,

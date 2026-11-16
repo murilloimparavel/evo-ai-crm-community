@@ -448,6 +448,7 @@ RSpec.describe Whatsapp::SendOnWhatsappService do
       end
 
       it 'marks the message failed with the Meta reason (the evidence case: sent + source_id NULL)' do
+        allow(conversation).to receive(:can_reply?).and_return(true)
         template_record = instance_double(MessageTemplate, approval_status: 'approved',
                                                            components: [{ 'type' => 'BODY', 'text' => 'Hi' }],
                                                            metadata: {})

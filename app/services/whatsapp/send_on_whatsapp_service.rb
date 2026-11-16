@@ -30,6 +30,10 @@ class Whatsapp::SendOnWhatsappService < Base::SendOnChannelService
       return
     end
 
+    send_approved_template_message
+  end
+
+  def send_approved_template_message
     name, namespace, lang_code, processed_parameters = processable_channel_message_template
 
     if name.blank?

@@ -46,6 +46,7 @@ RSpec.describe ActionCableListener do
       allow(Conversations::MessageWindowService).to receive(:new).with(conversation).and_return(
         instance_double(Conversations::MessageWindowService, can_reply?: false, reply_window_expires_at: expires_at)
       )
+      allow(message).to receive(:conversation_push_event_data).and_call_original
       payload = nil
       allow(ActionCableBroadcastJob).to receive(:perform_later) do |_tokens, _event, data|
         payload = data

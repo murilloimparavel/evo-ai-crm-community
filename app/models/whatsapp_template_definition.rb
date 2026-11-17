@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class WhatsappTemplateDefinition < ApplicationRecord
+  MAX_BODY_LENGTH = 1024
+
   has_many :publications, class_name: 'WhatsappTemplatePublication', dependent: :destroy
 
   validates :name, presence: true, uniqueness: { scope: :language },
@@ -8,8 +10,19 @@ class WhatsappTemplateDefinition < ApplicationRecord
   validates :language, :category, :content, presence: true
   validates :category, inclusion: { in: %w[MARKETING UTILITY] }
   validate :components_must_have_supported_shapes
+  validate :body_text_must_fit_whatsapp_limit
 
   private
+
+  def body_text_must_fit_whatsapp_limit
+    return unless components.is_a?(Array)
+
+    oversized_bodies = components.select { |component| component.is_a?(Hash) && component['type'] == 'BODY' }
+                                .select { |component| component['text'].to_s.length > MAX_BODY_LENGTH }
+    return if oversized_bodies.empty?
+
+    errors.add(:components, "BODY text must be at most #{MAX_BODY_LENGTH} characters")
+  end
 
   def components_must_have_supported_shapes
     unless components.is_a?(Array) && components.all? { |component| component.is_a?(Hash) }

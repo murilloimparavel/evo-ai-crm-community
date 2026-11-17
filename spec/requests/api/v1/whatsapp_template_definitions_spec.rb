@@ -67,6 +67,26 @@ RSpec.describe 'WhatsApp Cloud template definitions API', type: :request do
     expect(definition).to have_attributes(name: attributes[:name], category: 'UTILITY')
   end
 
+  it 'rejects every WhatsApp BODY above Meta\'s 1,024-character limit' do
+    login_as(user, 'message_templates.manage')
+    attributes = {
+      name: "qa_#{SecureRandom.hex(4)}",
+      language: 'pt_BR',
+      category: 'UTILITY',
+      content: 'x' * 1025,
+      components: [
+        { type: 'BODY', text: 'short body' },
+        { type: 'BODY', text: 'x' * 1025 }
+      ],
+      variables: []
+    }
+
+    post '/api/v1/whatsapp_template_definitions', params: { definition: attributes }, as: :json
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.body).to include('BODY text must be at most 1024 characters')
+  end
+
   it 'allows correcting and retrying a definition after a failed submission without a Meta ID' do
     login_as(user, 'message_templates.manage')
     definition = WhatsappTemplateDefinition.create!(

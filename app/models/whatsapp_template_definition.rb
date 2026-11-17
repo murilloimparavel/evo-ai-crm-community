@@ -17,8 +17,12 @@ class WhatsappTemplateDefinition < ApplicationRecord
   def body_text_must_fit_whatsapp_limit
     return unless components.is_a?(Array)
 
-    oversized_bodies = components.select { |component| component.is_a?(Hash) && component['type'] == 'BODY' }
-                                .select { |component| component['text'].to_s.length > MAX_BODY_LENGTH }
+    body_components = components.select do |component|
+      component.is_a?(Hash) && component['type'] == 'BODY'
+    end
+    oversized_bodies = body_components.select do |component|
+      component['text'].to_s.length > MAX_BODY_LENGTH
+    end
     return if oversized_bodies.empty?
 
     errors.add(:components, "BODY text must be at most #{MAX_BODY_LENGTH} characters")

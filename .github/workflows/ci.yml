@@ -234,6 +234,7 @@ jobs:
           file: ./docker/Dockerfile
           platforms: linux/amd64
           push: false
+          load: true
           build-args: |
             RAILS_ENV=production
             BUNDLE_WITHOUT=development:test
@@ -242,6 +243,12 @@ jobs:
           tags: local/evo-ai-crm-community:ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify Rails loads in the production image
+        run: |
+          docker run --rm --network none --entrypoint bundle \
+            local/evo-ai-crm-community:ci-${{ github.sha }} \
+            exec ruby -e 'require "rails/all"; abort "ruby-vips cannot block untrusted operations" unless Vips.respond_to?(:block_untrusted)'
 
   pr-gate:
     name: CRM required checks

@@ -58,6 +58,7 @@ gem 'aws-sdk-s3', '>= 1.208.0', require: false
 gem 'azure-storage-blob', git: 'https://github.com/chatwoot/azure-storage-ruby', branch: 'chatwoot', require: false
 gem 'google-cloud-storage', '>= 1.48.0', require: false
 gem 'image_processing'
+gem 'ruby-vips', '>= 2.2.1', '< 3', require: false
 
 ##-- gems for database --#
 gem 'groupdate'

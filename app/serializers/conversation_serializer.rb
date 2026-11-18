@@ -31,7 +31,9 @@ module ConversationSerializer
     unread_counts: nil,
     last_non_activity_messages: nil,
     labels_by_title: nil,
-    labels_by_id: nil
+    labels_by_id: nil,
+    last_incoming_message_at: nil,
+    last_incoming_message_loaded: false
   )
     result = conversation.as_json(
       only: [:id, :inbox_id, :status, :assignee_id, :team_id,
@@ -60,6 +62,17 @@ module ConversationSerializer
     # Sinaliza conversa de grupo (contact.type == 'group') para o front filtrar e
     # reconciliar a aba "Grupos" no realtime sem outra request.
     result['is_group'] = conversation.contact&.group? || false
+
+    # REST is the source used by the chat list and selected conversation. Keep
+    # both window fields in this payload so the composer can enforce the
+    # provider's current reply window immediately after selection/reload.
+    message_window = Conversations::MessageWindowService.new(
+      conversation,
+      last_incoming_message_at: last_incoming_message_at,
+      last_incoming_message_loaded: last_incoming_message_loaded
+    )
+    result['can_reply'] = message_window.can_reply?
+    result['reply_window_expires_at'] = message_window.reply_window_expires_at&.iso8601
 
     # Include contact
     if include_contact && conversation.contact.present?
@@ -237,6 +250,24 @@ module ConversationSerializer
   def serialize_collection(conversations, **options)
     return [] unless conversations
 
-    conversations.map { |conversation| serialize(conversation, **options) }
+    conversation_list = conversations.to_a
+    return [] if conversation_list.empty?
+
+    # Bulk-load only timestamps instead of querying each conversation's
+    # messages association while serializing list responses.
+    last_incoming_message_times = Message.incoming
+                                         .reorder(nil)
+                                         .where(conversation_id: conversation_list.map(&:id))
+                                         .group(:conversation_id)
+                                         .maximum(:created_at)
+
+    conversation_list.map do |conversation|
+      serialize(
+        conversation,
+        **options,
+        last_incoming_message_at: last_incoming_message_times[conversation.id],
+        last_incoming_message_loaded: true
+      )
+    end
   end
 end

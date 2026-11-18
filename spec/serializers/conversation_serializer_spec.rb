@@ -9,22 +9,23 @@ RSpec.describe ConversationSerializer do
     it 'includes the authoritative reply window fields in the REST payload' do
       now = Time.zone.parse('2026-11-18 10:00:00 UTC')
       expires_at = now - 1.hour
-      conversation = double('Conversation',
-                            as_json: { 'id' => 1, 'inbox_id' => 1, 'status' => 'open',
-                                       'assignee_id' => nil, 'team_id' => nil, 'campaign_id' => nil,
-                                       'display_id' => 1, 'additional_attributes' => {}, 'priority' => nil },
-                            created_at: now, updated_at: now,
-                            agent_last_seen_at: nil, contact_last_seen_at: nil,
-                            waiting_since: nil, first_reply_created_at: nil, snoozed_until: nil,
-                            last_activity_at: now, custom_attributes: {}, unread_incoming_messages_count: 0,
-                            contact: nil, inbox: nil, assignee: nil, team: nil,
-                            cached_label_list_array: [], messages: double('Relation', last: nil))
+      conversation = instance_double(Conversation,
+                                     as_json: { 'id' => 1, 'inbox_id' => 1, 'status' => 'open',
+                                                'assignee_id' => nil, 'team_id' => nil, 'campaign_id' => nil,
+                                                'display_id' => 1, 'additional_attributes' => {}, 'priority' => nil },
+                                     created_at: now, updated_at: now,
+                                     agent_last_seen_at: nil, contact_last_seen_at: nil,
+                                     waiting_since: nil, first_reply_created_at: nil, snoozed_until: nil,
+                                     last_activity_at: now, custom_attributes: {}, unread_incoming_messages_count: 0,
+                                     contact: nil, inbox: nil, assignee: nil, team: nil,
+                                     cached_label_list_array: [], messages: [])
       window = instance_double(Conversations::MessageWindowService,
                                can_reply?: false, reply_window_expires_at: expires_at)
       allow(Conversations::MessageWindowService).to receive(:new)
         .with(conversation, last_incoming_message_at: nil, last_incoming_message_loaded: false)
         .and_return(window)
-      allow(conversation).to receive(:association).and_return(double(loaded?: false))
+      association = instance_double(ActiveRecord::Associations::CollectionAssociation, loaded?: false)
+      allow(conversation).to receive(:association).and_return(association)
 
       result = described_class.serialize(conversation, include_contact: false, include_inbox: false)
 

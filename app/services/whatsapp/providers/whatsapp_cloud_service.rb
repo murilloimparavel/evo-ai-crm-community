@@ -288,6 +288,8 @@ module Whatsapp
       end
 
       def create_template(template_data)
+        validate_template_body_length!(template_data['components'])
+
         # Processar componentes para adicionar examples quando necessário
         processed_components = process_template_components(template_data['components'])
 
@@ -787,6 +789,17 @@ module Whatsapp
 
           processed_component
         end
+      end
+
+      def validate_template_body_length!(components)
+        oversized_body = Array(components).any? do |component|
+          component.is_a?(Hash) && component['type'] == 'BODY' &&
+            component['text'].to_s.length > WhatsappTemplateDefinition::MAX_BODY_LENGTH
+        end
+        return unless oversized_body
+
+        raise ArgumentError,
+              "WhatsApp template BODY text must be at most #{WhatsappTemplateDefinition::MAX_BODY_LENGTH} characters"
       end
 
       def process_button_component(button)

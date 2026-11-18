@@ -183,6 +183,21 @@ RSpec.describe Whatsapp::Providers::WhatsappCloudService do
     end
   end
 
+  describe '#create_template' do
+    it 'rejects a BODY over Meta\'s 1,024-character limit before making an HTTP request' do
+      expect(HTTParty).not_to receive(:post)
+
+      expect do
+        service.create_template(
+          'name' => 'too_long',
+          'category' => 'UTILITY',
+          'language' => 'pt_BR',
+          'components' => [{ 'type' => 'BODY', 'text' => 'x' * 1025 }]
+        )
+      end.to raise_error(ArgumentError, /BODY text must be at most 1024 characters/)
+    end
+  end
+
   describe '#upload_media_to_whatsapp' do
     it 'raises with explicit prefix when cloud api rejects media' do
       upload_file = Tempfile.new(['audio', '.webm'])

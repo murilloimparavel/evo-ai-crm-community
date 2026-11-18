@@ -86,8 +86,8 @@ module Api
         return error_response(ApiErrorCodes::VALIDATION_ERROR, 'One or more selected WABAs are not connected to a WhatsApp Cloud inbox', status: :unprocessable_entity) if unknown_wabas.any?
 
         publications = waba_ids.map do |waba_id|
-          Whatsapp::TemplatePublicationService.new(definition: definition, waba_id: waba_id).call
-        rescue Whatsapp::TemplatePublicationService::PublicationError => e
+          ::Whatsapp::TemplatePublicationService.new(definition: definition, waba_id: waba_id).call
+        rescue ::Whatsapp::TemplatePublicationService::PublicationError => e
           definition.publications.find_by(waba_id: waba_id) ||
             definition.publications.create!(waba_id: waba_id, status: 'failed', operational_error: e.message.truncate(500))
         end

@@ -2,8 +2,10 @@ class Conversations::MessageWindowService
   MESSAGING_WINDOW_24_HOURS = 24.hours
   MESSAGING_WINDOW_7_DAYS = 7.days
 
-  def initialize(conversation)
+  def initialize(conversation, last_incoming_message_at: nil, last_incoming_message_loaded: false)
     @conversation = conversation
+    @last_incoming_message_at = last_incoming_message_at
+    @last_incoming_message_loaded = last_incoming_message_loaded
   end
 
   def can_reply?
@@ -24,7 +26,7 @@ class Conversations::MessageWindowService
     window = messaging_window
     return if window.blank?
 
-    last_incoming_message&.created_at&.+(window)
+    last_incoming_message_at&.+(window)
   end
 
   private
@@ -53,9 +55,9 @@ class Conversations::MessageWindowService
   end
 
   def last_message_in_messaging_window?(time)
-    return false if last_incoming_message.nil?
+    return false if last_incoming_message_at.nil?
 
-    Time.current < last_incoming_message.created_at + time
+    Time.current < last_incoming_message_at + time
   end
 
   def api_messaging_window
@@ -84,7 +86,11 @@ class Conversations::MessageWindowService
     GlobalConfigService.load(config_key, nil) ? MESSAGING_WINDOW_7_DAYS : MESSAGING_WINDOW_24_HOURS
   end
 
-  def last_incoming_message
-    @last_incoming_message ||= @conversation.messages&.incoming&.last
+  def last_incoming_message_at
+    return @last_incoming_message_at if @last_incoming_message_loaded
+
+    @last_incoming_message_at = @conversation.messages&.incoming&.maximum(:created_at)
+    @last_incoming_message_loaded = true
+    @last_incoming_message_at
   end
 end

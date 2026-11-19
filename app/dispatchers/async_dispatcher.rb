@@ -50,8 +50,10 @@ class AsyncDispatcher < BaseDispatcher
 
   def log_conversation_event_enqueue(event_name, data, job)
     status = job&.successfully_enqueued? ? 'enqueued' : 'enqueue_rejected'
-    Rails.logger.public_send(status == 'enqueued' ? :info : :error,
-                             "[EventDispatcher] #{status} event=#{event_name} conversation_id=#{conversation_id_from_event(data)} job_id=#{job&.job_id}")
+    log_level = status == 'enqueued' ? :info : :error
+    details = "[EventDispatcher] #{status} event=#{event_name} " \
+              "conversation_id=#{conversation_id_from_event(data)} job_id=#{job&.job_id}"
+    Rails.logger.public_send(log_level, details)
   end
 
   def log_conversation_event_enqueue_failure(event_name, data, error)

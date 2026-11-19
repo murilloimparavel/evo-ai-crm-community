@@ -14,15 +14,32 @@ class EventDispatcherJob < ApplicationJob
   private
 
   def log_conversation_event(state, event_name, data, error_class = nil)
-    return unless %w[
+    return unless conversation_status_event?(event_name)
+
+    Rails.logger.public_send(log_level(error_class), conversation_event_log_line(state, event_name, data, error_class))
+  end
+
+  def conversation_status_event?(event_name)
+    %w[
       conversation_updated conversation_status_changed conversation_resolved conversation_opened
       conversation.updated conversation.status_changed conversation.resolved conversation.opened
     ].include?(event_name.to_s)
+  end
 
-    conversation = data[:conversation] || data['conversation'] if data.respond_to?(:[])
-    conversation_id = conversation&.id || data[:conversation_id] || data['conversation_id'] if data.respond_to?(:[])
-    details = "[EventDispatcher] #{state} event=#{event_name} conversation_id=#{conversation_id} job_id=#{job_id}"
-    details += " error=#{error_class}" if error_class
-    Rails.logger.public_send(error_class ? :error : :info, details)
+  def log_level(error_class)
+    error_class ? :error : :info
+  end
+
+  def conversation_event_log_line(state, event_name, data, error_class)
+    details = "[EventDispatcher] #{state} event=#{event_name} " \
+              "conversation_id=#{conversation_id_from_event(data)} job_id=#{job_id}"
+    error_class ? "#{details} error=#{error_class}" : details
+  end
+
+  def conversation_id_from_event(data)
+    return unless data.respond_to?(:[])
+
+    conversation = data[:conversation] || data['conversation']
+    conversation&.id || data[:conversation_id] || data['conversation_id']
   end
 end

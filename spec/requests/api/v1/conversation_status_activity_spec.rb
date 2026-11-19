@@ -29,8 +29,8 @@ RSpec.describe 'Conversation status activity', type: :request do
 
   after { Current.reset }
 
-  it 'persists the activity and runs conversation_updated automation for an authenticated status change' do
-    rule = AutomationRule.new(
+  let(:rule) do
+    AutomationRule.new(
       name: "status-activity-#{SecureRandom.hex(4)}",
       event_name: 'conversation_updated',
       active: true,
@@ -40,26 +40,53 @@ RSpec.describe 'Conversation status activity', type: :request do
       }],
       actions: []
     )
-    rule.save!(validate: false)
+  end
 
+  before do
+    rule.save!(validate: false)
+    perform_status_change
+  end
+
+  it 'returns success for an authenticated status change' do
+    expect(response).to have_http_status(:ok)
+  end
+
+  it 'updates the conversation status' do
+    expect(conversation.reload.status).to eq('resolved')
+  end
+
+  it 'persists an activity message for the status change' do
+    expect(status_activity).to have_attributes(private: false, content: include(user.name))
+  end
+
+  it 'stores the actor and transition metadata on the activity message' do
+    metadata = status_activity.content_attributes.fetch('status_change')
+    expected_metadata = {
+      'event_id' => status_activity.activity_event_id,
+      'from' => 'open',
+      'to' => 'resolved',
+      'actor' => { 'type' => 'user', 'id' => user.id, 'name' => user.name }
+    }
+
+    expect(metadata).to include(expected_metadata)
+  end
+
+  it 'runs the matching conversation_updated automation' do
+    expect(AutomationRuleRun.where(automation_rule: rule, status: 'matched')).to exist
+  end
+
+  def perform_status_change
     perform_enqueued_jobs(only: [Conversations::ActivityMessageJob, EventDispatcherJob]) do
       post "/api/v1/conversations/#{conversation.display_id}/toggle_status",
            params: { status: 'resolved' }, as: :json
     end
+  end
 
-    expect(response).to have_http_status(:ok)
-    expect(conversation.reload.status).to eq('resolved')
-
-    activity = conversation.messages.where(message_type: :activity).where.not(activity_event_id: nil)
-                             .order(created_at: :desc).first!
-    expect(activity.private).to be(false)
-    expect(activity.content).to include(user.name)
-    status_change = activity.content_attributes.fetch('status_change')
-    expect(activity.activity_event_id).to eq(status_change.fetch('event_id'))
-    expect(status_change.fetch('from')).to eq('open')
-    expect(status_change.fetch('to')).to eq('resolved')
-    expect(status_change.dig('actor', 'type')).to eq('user')
-    expect(status_change.dig('actor', 'id')).to eq(user.id)
-    expect(AutomationRuleRun.where(automation_rule: rule, status: 'matched')).to exist
+  def status_activity
+    conversation.messages
+                .where(message_type: :activity)
+                .where.not(activity_event_id: nil)
+                .order(created_at: :desc)
+                .first
   end
 end

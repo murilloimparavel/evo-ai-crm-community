@@ -21,7 +21,9 @@ RSpec.describe ActivityMessageHandler do
 
   before do
     # These specs cover status activity generation, not downstream event delivery.
-    allow(EventDispatcherJob).to receive(:perform_later)
+    allow(EventDispatcherJob).to receive(:perform_later).and_return(
+      instance_double(ActiveJob::Base, successfully_enqueued?: true, job_id: 'dispatcher-job')
+    )
   end
 
   def capture_activity_jobs

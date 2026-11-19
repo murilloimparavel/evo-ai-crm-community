@@ -22,6 +22,7 @@ RSpec.describe 'Conversation#bot_handoff! activity', type: :model do
     captured = []
     allow(Conversations::ActivityMessageJob).to receive(:perform_later) do |_record, params|
       captured << params
+      instance_double(ActiveJob::Base, successfully_enqueued?: true, job_id: 'captured-job')
     end
     captured
   end
@@ -94,6 +95,7 @@ RSpec.describe 'Conversation#return_to_bot!', type: :model do
     captured = []
     allow(Conversations::ActivityMessageJob).to receive(:perform_later) do |_record, params|
       captured << params
+      instance_double(ActiveJob::Base, successfully_enqueued?: true, job_id: 'captured-job')
     end
     captured
   end

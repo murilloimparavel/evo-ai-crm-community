@@ -38,7 +38,7 @@ module StatusChangeActivityHandler
 
   def enqueue_status_activity(message_params, from_status, to_status, actor_type, event_id)
     job, enqueue_error = enqueue_status_activity_job(message_params)
-    return log_status_activity_enqueued(job, from_status, to_status, actor_type, event_id) if job&.successfully_enqueued?
+    return log_status_activity_enqueued(job, from_status, to_status, actor_type, event_id) if status_activity_enqueued?(job)
 
     log_status_activity_rejected(job, enqueue_error, from_status, to_status, actor_type, event_id)
     persist_status_activity_fallback(message_params, event_id)
@@ -48,6 +48,10 @@ module StatusChangeActivityHandler
     [::Conversations::ActivityMessageJob.perform_later(self, message_params), nil]
   rescue StandardError => e
     [nil, e]
+  end
+
+  def status_activity_enqueued?(job)
+    job.respond_to?(:successfully_enqueued?) && job.successfully_enqueued?
   end
 
   def log_status_activity_enqueued(job, from_status, to_status, actor_type, event_id)

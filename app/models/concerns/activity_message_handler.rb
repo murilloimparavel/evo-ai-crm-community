@@ -46,13 +46,61 @@ module ActivityMessageHandler
   end
 
   def status_change_activity(user_name)
-    content = if Current.executed_by.present?
-                automation_status_change_activity_content
-              else
-                user_status_change_activity_content(user_name)
-              end
+    from_status = nil
+    to_status = nil
+    status_change = saved_change_to_status
+    return if status_change.blank?
 
-    ::Conversations::ActivityMessageJob.perform_later(self, activity_message_params(content)) if content
+    from_status, to_status = status_change
+    executed_by = Current.executed_by
+    actor_type, actor_name, actor_id, execution_source = status_change_activity_actor(user_name, executed_by)
+    content = status_change_activity_content(to_status, actor_type, actor_name, executed_by)
+    activity_event_id = SecureRandom.uuid
+    message_params = activity_message_params(content).merge(
+      activity_event_id: activity_event_id,
+      content_attributes: {
+        status_change: {
+          event_id: activity_event_id,
+          from: from_status.to_s,
+          to: to_status.to_s,
+          actor: { type: actor_type, id: actor_id, name: actor_name },
+          execution_source: execution_source
+        }
+      }
+    )
+
+    enqueue_error = nil
+    job = begin
+      ::Conversations::ActivityMessageJob.perform_later(self, message_params)
+    rescue StandardError => e
+      enqueue_error = e
+      nil
+    end
+
+    if job&.successfully_enqueued?
+      Rails.logger.info(
+        "[ConversationActivity] status_change_enqueued conversation_id=#{id} " \
+        "event_id=#{activity_event_id} from=#{from_status} to=#{to_status} " \
+        "actor_type=#{actor_type} job_id=#{job.job_id}"
+      )
+    else
+      Rails.logger.error(
+        "[ConversationActivity] status_change_enqueue_rejected conversation_id=#{id} " \
+        "event_id=#{activity_event_id} from=#{from_status} to=#{to_status} " \
+        "actor_type=#{actor_type} job_id=#{job&.job_id} error=#{enqueue_error&.class}"
+      )
+      message = ::Conversations::ActivityMessageJob.perform_now(self, message_params)
+      Rails.logger.info(
+        "[ConversationActivity] status_change_fallback_persisted conversation_id=#{id} " \
+        "event_id=#{activity_event_id} message_id=#{message.id}"
+      )
+    end
+  rescue StandardError => e
+    Rails.logger.error(
+      "[ConversationActivity] status_change_activity_failed conversation_id=#{id} " \
+      "from=#{from_status} to=#{to_status} error=#{e.class}"
+    )
+    raise
   end
 
   def auto_resolve_message_key(minutes)
@@ -65,23 +113,35 @@ module ActivityMessageHandler
     end
   end
 
-  def user_status_change_activity_content(user_name)
-    if user_name
-      I18n.t("conversations.activity.status.#{status}", user_name: user_name)
-    elsif Current.contact.present? && resolved?
-      I18n.t('conversations.activity.status.contact_resolved', contact_name: Current.contact.name.capitalize)
-    elsif resolved?
-      message_data = auto_resolve_message_key(auto_resolve_after || 0)
-      I18n.t("conversations.activity.status.#{message_data[:key]}", count: message_data[:count])
+  def status_change_activity_actor(user_name, executed_by)
+    if executed_by.is_a?(AutomationRule)
+      ['automation', I18n.t('automation.system_name'), executed_by.id, executed_by.class.name]
+    elsif executed_by.is_a?(Contact)
+      ['contact', executed_by.name.presence || I18n.t('automation.system_name'), executed_by.id, executed_by.class.name]
+    elsif Current.contact.present?
+      ['contact', Current.contact.name.presence || I18n.t('automation.system_name'), Current.contact.id, Current.contact.class.name]
+    elsif user_name.present?
+      ['user', user_name, Current.user&.id, Current.user&.class&.name]
+    else
+      # Unknown execution sources (for example :stage_automation) still need a
+      # visible timeline entry instead of silently dropping the status change.
+      source_name = executed_by.is_a?(Symbol) ? executed_by.to_s : executed_by&.class&.name
+      ['system', I18n.t('automation.system_name'), nil, source_name]
     end
   end
 
-  def automation_status_change_activity_content
-    if Current.executed_by.instance_of?(AutomationRule)
-      I18n.t("conversations.activity.status.#{status}", user_name: I18n.t('automation.system_name'))
-    elsif Current.executed_by.instance_of?(Contact)
-      Current.executed_by = nil
+  def status_change_activity_content(to_status, actor_type, actor_name, executed_by)
+    if actor_type == 'contact' && to_status.to_s == 'resolved'
+      I18n.t('conversations.activity.status.contact_resolved', contact_name: actor_name.capitalize)
+    elsif actor_type == 'contact' && to_status.to_s == 'open'
+      # Preserve the existing loop guard for contact-triggered reopen events.
+      Current.executed_by = nil if executed_by.is_a?(Contact)
       I18n.t('conversations.activity.status.system_auto_open')
+    elsif actor_type == 'system' && to_status.to_s == 'resolved' && executed_by.nil? && auto_resolve_after.present?
+      message_data = auto_resolve_message_key(auto_resolve_after)
+      I18n.t("conversations.activity.status.#{message_data[:key]}", count: message_data[:count])
+    else
+      I18n.t("conversations.activity.status.#{to_status}", user_name: actor_name)
     end
   end
 

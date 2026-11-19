@@ -138,7 +138,7 @@ RSpec.describe ActivityMessageHandler do
     expect(events.find { |event| event[:action] == 'team_assigned' }[:target]).to include(
       type: 'team', id: team.id.to_s, name: team.name
     )
-    expect(events.find { |event| event[:action] == 'priority_changed' }[:changes]).to eq(from: 0, to: 3)
+    expect(events.find { |event| event[:action] == 'priority_changed' }[:changes]).to eq(from: nil, to: 'urgent')
   end
 
   it 'records team and assignee changes together when both change in one save' do

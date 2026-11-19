@@ -18,7 +18,15 @@ module LabelActivityMessageHandler
 
     resolved = resolve_label_titles_for_activity(labels)
     content = I18n.t("conversations.activity.labels.#{change_type}", user_name: user_name, labels: resolved.join(', '))
-    ::Conversations::ActivityMessageJob.perform_later(self, activity_message_params(content)) if content
+    action = change_type == 'added' ? 'labels_added' : 'labels_removed'
+    ids = Array(labels).map(&:to_s).grep(UUID_LABEL_REGEX)
+    event = activity_event_payload(
+      action: action,
+      actor_name: user_name,
+      target: { type: 'labels', ids: ids, names: resolved },
+      changes: { added: change_type == 'added' ? resolved : [], removed: change_type == 'removed' ? resolved : [] }
+    )
+    enqueue_activity_event(content, event)
   end
 
   # Defense-in-depth at the render boundary. The primary write paths that fed

@@ -21,20 +21,41 @@ module StatusChangeActivityHandler
   end
 
   def status_activity_message_params(from_status, to_status, actor, event_id)
-    actor_type, actor_name, actor_id, execution_source = actor
+    actor_type, actor_name, _, execution_source = actor
     content = status_change_activity_content(to_status, actor_type, actor_name, Current.executed_by)
-    activity_message_params(content).merge(
-      activity_event_id: event_id,
-      content_attributes: {
-        status_change: {
-          event_id: event_id,
-          from: from_status.to_s,
-          to: to_status.to_s,
-          actor: { type: actor_type, id: actor_id, name: actor_name },
-          execution_source: execution_source
-        }
-      }
+    activity_event = status_activity_event(from_status, to_status, actor, event_id)
+    status_change = status_change_attributes(event_id, from_status, to_status, actor, execution_source)
+    activity_message_params(content, activity_event: activity_event).merge(
+      content_attributes: { activity_event: activity_event, status_change: status_change }
     )
+  end
+
+  def status_activity_event(from_status, to_status, actor, event_id)
+    actor_type, actor_name, actor_id, execution_source = actor
+    event = activity_event_payload(
+      action: 'status_changed', actor_name: actor_name, event_id: event_id,
+      target: { type: 'conversation', id: id.to_s },
+      changes: { from: from_status.to_s, to: to_status.to_s }
+    )
+    event[:actor] = status_activity_event_actor(actor_type, actor_name, actor_id, execution_source)
+    event
+  end
+
+  def status_activity_event_actor(actor_type, actor_name, actor_id, execution_source)
+    return activity_event_actor(actor_name) if Current.executed_by.is_a?(AutomationRule)
+
+    { type: actor_type, id: actor_id&.to_s, name: actor_name, source: execution_source }
+  end
+
+  def status_change_attributes(event_id, from_status, to_status, actor, execution_source)
+    actor_type, actor_name, actor_id, = actor
+    {
+      event_id: event_id,
+      from: from_status.to_s,
+      to: to_status.to_s,
+      actor: { type: actor_type, id: actor_id, name: actor_name },
+      execution_source: execution_source
+    }
   end
 
   def enqueue_status_activity(message_params, context)

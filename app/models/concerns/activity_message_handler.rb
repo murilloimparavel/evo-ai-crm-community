@@ -6,6 +6,7 @@ module ActivityMessageHandler
   include TeamActivityMessageHandler
   include BotHandoffActivityMessageHandler
   include StatusChangeActivityHandler
+  include ActivityEventMetadataHandler
 
   private
 
@@ -46,8 +47,17 @@ module ActivityMessageHandler
     create_sla_change_activity(sla_change_type, activity_message_owner(user_name))
   end
 
-  def activity_message_params(content)
-    { inbox_id: inbox_id, message_type: :activity, content: content }
+  def activity_message_params(content, activity_event: nil)
+    params = { inbox_id: inbox_id, message_type: :activity, content: content }
+    return params unless activity_event
+
+    params[:activity_event_id] = activity_event[:event_id]
+    params[:content_attributes] = { activity_event: activity_event }
+
+    actor = activity_event[:actor]
+    params[:sender] = Current.user if activity_event_sender?(actor)
+
+    params
   end
 
   def create_muted_message
@@ -62,7 +72,13 @@ module ActivityMessageHandler
     return unless Current.user
 
     content = I18n.t("conversations.activity.#{change_type}", user_name: Current.user.name)
-    ::Conversations::ActivityMessageJob.perform_later(self, activity_message_params(content)) if content
+    event = activity_event_payload(
+      action: change_type == 'muted' ? 'conversation_muted' : 'conversation_unmuted',
+      actor_name: Current.user.name,
+      target: { type: 'conversation', id: id.to_s },
+      changes: { muted: change_type == 'muted' }
+    )
+    enqueue_activity_event(content, event)
   end
 
   def generate_assignee_change_activity_content(user_name)
@@ -78,12 +94,36 @@ module ActivityMessageHandler
     return unless user_name
 
     content = generate_assignee_change_activity_content(user_name)
-    ::Conversations::ActivityMessageJob.perform_later(self, activity_message_params(content)) if content
+    event = assignee_activity_event(user_name)
+    enqueue_activity_event(content, event)
+  end
+
+  def assignee_activity_event(user_name)
+    old_id, new_id = previous_changes.fetch('assignee_id', [assignee_id, assignee_id])
+    assigned = new_id.present?
+    action = assigned ? 'assignee_assigned' : 'assignee_removed'
+    target_name = assigned ? assignee&.name : User.find_by(id: old_id)&.name
+    target = { type: 'user', id: (new_id || old_id)&.to_s, name: target_name }
+    activity_event_payload(
+      action: action,
+      actor_name: user_name,
+      target: target,
+      changes: assignee_id_changes(old_id, new_id)
+    )
+  end
+
+  def assignee_id_changes(old_id, new_id)
+    { from: old_id&.to_s, to: new_id&.to_s }
   end
 
   def activity_message_owner(user_name)
-    user_name = I18n.t('automation.system_name') if !user_name && Current.executed_by.present?
-    user_name
+    return I18n.t('automation.system_name') if Current.executed_by.is_a?(AutomationRule)
+
+    contact = Current.executed_by.is_a?(Contact) ? Current.executed_by : Current.contact
+    return contact.name if contact.present?
+    return user_name if user_name.present?
+
+    I18n.t('automation.system_name')
   end
 end
 

@@ -49,6 +49,13 @@ RSpec.describe ActivityMessageHandler do
       from: 'open', to: 'resolved', actor: { type: 'user', id: user.id, name: user.name },
       execution_source: 'User'
     )
+    expect(message_params.dig(:content_attributes, :activity_event)).to include(
+      event_id: message_params[:activity_event_id],
+      action: 'status_changed',
+      actor: hash_including(type: 'user', id: user.id.to_s, name: user.name),
+      target: { type: 'conversation', id: conversation.id.to_s },
+      changes: { from: 'open', to: 'resolved' }
+    )
   end
 
   it 'attributes an AutomationRule status change to the system' do
@@ -71,6 +78,10 @@ RSpec.describe ActivityMessageHandler do
       from: 'open', to: 'resolved',
       actor: { type: 'automation', id: rule.id, name: I18n.t('automation.system_name') },
       execution_source: 'AutomationRule'
+    )
+    expect(message_params.dig(:content_attributes, :activity_event, :actor)).to include(
+      type: 'automation', id: rule.id.to_s, name: rule.name,
+      display_name: I18n.t('automation.system_name'), source: 'AutomationRule'
     )
   end
 
@@ -95,6 +106,92 @@ RSpec.describe ActivityMessageHandler do
     expect(Conversations::ActivityMessageJob).not_to receive(:perform_later)
 
     conversation.update!(status: :open)
+  end
+
+  it 'records the actor and assignee for assignment and removal activities' do
+    Current.user = user
+    jobs = capture_activity_jobs
+
+    conversation.update!(assignee: user)
+    conversation.update!(assignee: nil)
+
+    expect(jobs.map { |params| params.dig(:content_attributes, :activity_event, :action) }).to eq(
+      %w[assignee_assigned assignee_removed]
+    )
+    assigned = jobs.first.dig(:content_attributes, :activity_event)
+    expect(assigned[:actor]).to include(type: 'user', id: user.id.to_s, name: user.name)
+    expect(assigned[:target]).to include(type: 'user', id: user.id.to_s, name: user.name)
+    expect(jobs.map { |params| params[:activity_event_id] }.uniq.size).to eq(2)
+  end
+
+  it 'records team changes and priority changes with structured targets and values' do
+    Current.user = user
+    jobs = capture_activity_jobs
+    team = Team.create!(name: 'Activity Audit Team')
+
+    conversation.update!(team: team)
+    conversation.update!(team: nil)
+    conversation.update!(priority: :urgent)
+
+    events = jobs.map { |params| params.dig(:content_attributes, :activity_event) }
+    expect(events.map { |event| event[:action] }).to include('team_assigned', 'team_removed', 'priority_changed')
+    expect(events.find { |event| event[:action] == 'team_assigned' }[:target]).to include(
+      type: 'team', id: team.id.to_s, name: team.name
+    )
+    expect(events.find { |event| event[:action] == 'priority_changed' }[:changes]).to eq(from: nil, to: 'urgent')
+  end
+
+  it 'records team and assignee changes together when both change in one save' do
+    Current.user = user
+    jobs = capture_activity_jobs
+    team = Team.create!(name: 'Activity Audit Combined Team')
+    team.add_members([user.id])
+
+    conversation.update!(team: team, assignee: user)
+
+    expect(jobs.size).to eq(1)
+    event = jobs.fetch(0).dig(:content_attributes, :activity_event)
+    expect(event[:action]).to eq('team_assigned')
+    expect(event[:target]).to include(type: 'team', id: team.id.to_s, name: team.name)
+    expect(event.dig(:changes, :team)).to eq(from: nil, to: team.id.to_s)
+    expect(event.dig(:changes, :assignee)).to eq(
+      from: { id: nil, name: nil }, to: { id: user.id.to_s, name: user.name }
+    )
+    expect(jobs.fetch(0)[:content]).to include(team.name, user.name)
+  end
+
+  it 'uses the automation rule consistently in the content and structured actor' do
+    target_user = User.create!(name: 'Assigned Agent', email: "assigned-#{SecureRandom.hex(4)}@test.com")
+    rule = AutomationRule.create!(
+      name: "Assign conversation #{SecureRandom.hex(3)}", event_name: 'conversation_updated',
+      conditions: [], actions: [], active: true
+    )
+    Current.user = user
+    Current.executed_by = rule
+    jobs = capture_activity_jobs
+
+    conversation.update!(assignee: target_user)
+
+    params = jobs.fetch(0)
+    event = params.dig(:content_attributes, :activity_event)
+    expect(event[:actor]).to include(type: 'automation', id: rule.id.to_s, name: rule.name)
+    expect(params[:content]).to include(I18n.t('automation.system_name'))
+    expect(params[:content]).not_to include(user.name)
+  end
+
+  it 'uses the contact consistently in the content and structured actor' do
+    target_user = User.create!(name: 'Assigned Agent', email: "assigned-#{SecureRandom.hex(4)}@test.com")
+    Current.user = user
+    Current.executed_by = contact
+    jobs = capture_activity_jobs
+
+    conversation.update!(assignee: target_user)
+
+    params = jobs.fetch(0)
+    event = params.dig(:content_attributes, :activity_event)
+    expect(event[:actor]).to include(type: 'contact', id: contact.id.to_s, name: contact.name)
+    expect(params[:content]).to include(contact.name)
+    expect(params[:content]).not_to include(user.name)
   end
 
   it 'logs a rejected enqueue instead of claiming success' do

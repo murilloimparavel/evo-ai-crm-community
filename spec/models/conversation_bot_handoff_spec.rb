@@ -36,6 +36,12 @@ RSpec.describe 'Conversation#bot_handoff! activity', type: :model do
     expect(handoff).to be_present
     expect(handoff[:message_type]).to eq(:activity)
     expect(handoff[:content]).to eq(I18n.t('conversations.activity.bot_handoff'))
+    event = handoff.dig(:content_attributes, :activity_event)
+    expect(event).to include(
+      action: 'bot_handoff', target: { type: 'conversation', id: conversation.id.to_s },
+      changes: { from: 'bot', to: 'human' }
+    )
+    expect(handoff[:activity_event_id]).to eq(event[:event_id])
   end
 
   it 'does not log a handoff activity when the conversation is already open' do
@@ -120,6 +126,10 @@ RSpec.describe 'Conversation#return_to_bot!', type: :model do
       expect(handoff).to be_present
       expect(handoff[:message_type]).to eq(:activity)
       expect(handoff[:content]).to eq(I18n.t('conversations.activity.human_handoff'))
+      expect(handoff.dig(:content_attributes, :activity_event)).to include(
+        action: 'human_handoff', target: { type: 'conversation', id: open_conversation.id.to_s },
+        changes: { from: 'human', to: 'bot' }
+      )
     end
 
     it 'dispatches CONVERSATION_HUMAN_HANDOFF exactly once' do

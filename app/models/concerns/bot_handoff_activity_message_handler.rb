@@ -14,7 +14,14 @@ module BotHandoffActivityMessageHandler
     return unless saved_change_to_status?
 
     content = I18n.t('conversations.activity.bot_handoff')
-    params = activity_message_params(content).merge(content_attributes: { handoff_type: 'bot_to_human' })
+    event = activity_event_payload(
+      action: 'bot_handoff', actor_name: activity_message_owner(Current.user&.name),
+      target: { type: 'conversation', id: id.to_s },
+      changes: { from: 'bot', to: 'human' }
+    )
+    params = activity_message_params(content, activity_event: event).merge(
+      content_attributes: { handoff_type: 'bot_to_human', activity_event: event }
+    )
     ::Conversations::ActivityMessageJob.perform_later(self, params)
   end
 
@@ -25,7 +32,14 @@ module BotHandoffActivityMessageHandler
     return unless saved_change_to_status?
 
     content = I18n.t('conversations.activity.human_handoff')
-    params = activity_message_params(content).merge(content_attributes: { handoff_type: 'human_to_bot' })
+    event = activity_event_payload(
+      action: 'human_handoff', actor_name: activity_message_owner(Current.user&.name),
+      target: { type: 'conversation', id: id.to_s },
+      changes: { from: 'human', to: 'bot' }
+    )
+    params = activity_message_params(content, activity_event: event).merge(
+      content_attributes: { handoff_type: 'human_to_bot', activity_event: event }
+    )
     ::Conversations::ActivityMessageJob.perform_later(self, params)
   end
 end

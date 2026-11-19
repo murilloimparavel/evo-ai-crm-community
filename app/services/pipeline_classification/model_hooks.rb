@@ -74,12 +74,15 @@ module PipelineClassification
       if changed || labels_changed
         # Lifecycle takes a row lock, which reloads its object and clears saved_changes.
         # Keep the callback's instance intact for the remaining after-commit handlers.
-        target = Conversation.find_by(id: conversation.id)
-        Lifecycle.invalidate!(conversation: target, reason: 'conversation_changed') if target
+        with_fresh_conversation(conversation) { |target| Lifecycle.invalidate!(conversation: target, reason: 'conversation_changed') }
       elsif conversation.saved_changes.key?('custom_attributes')
-        target = Conversation.find_by(id: conversation.id)
-        Lifecycle.context_changed!(conversation: target) if target
+        with_fresh_conversation(conversation) { |target| Lifecycle.context_changed!(conversation: target) }
       end
+    end
+
+    def self.with_fresh_conversation(conversation)
+      target = Conversation.find_by(id: conversation.id)
+      yield target if target
     end
 
     def self.contact_updated(contact)

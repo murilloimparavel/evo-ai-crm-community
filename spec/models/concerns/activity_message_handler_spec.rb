@@ -79,6 +79,10 @@ RSpec.describe ActivityMessageHandler do
       actor: { type: 'automation', id: rule.id, name: I18n.t('automation.system_name') },
       execution_source: 'AutomationRule'
     )
+    expect(message_params.dig(:content_attributes, :activity_event, :actor)).to include(
+      type: 'automation', id: rule.id.to_s, name: rule.name,
+      display_name: I18n.t('automation.system_name'), source: 'AutomationRule'
+    )
   end
 
   it 'uses a system actor for an unrecognized execution source instead of dropping the activity' do
@@ -135,6 +139,25 @@ RSpec.describe ActivityMessageHandler do
       type: 'team', id: team.id.to_s, name: team.name
     )
     expect(events.find { |event| event[:action] == 'priority_changed' }[:changes]).to eq(from: 0, to: 3)
+  end
+
+  it 'records team and assignee changes together when both change in one save' do
+    Current.user = user
+    jobs = capture_activity_jobs
+    team = Team.create!(name: 'Activity Audit Combined Team')
+    team.add_members([user.id])
+
+    conversation.update!(team: team, assignee: user)
+
+    expect(jobs.size).to eq(1)
+    event = jobs.fetch(0).dig(:content_attributes, :activity_event)
+    expect(event[:action]).to eq('team_assigned')
+    expect(event[:target]).to include(type: 'team', id: team.id.to_s, name: team.name)
+    expect(event.dig(:changes, :team)).to eq(from: nil, to: team.id.to_s)
+    expect(event.dig(:changes, :assignee)).to eq(
+      from: { id: nil, name: nil }, to: { id: user.id.to_s, name: user.name }
+    )
+    expect(jobs.fetch(0)[:content]).to include(team.name, user.name)
   end
 
   it 'uses the automation rule consistently in the content and structured actor' do

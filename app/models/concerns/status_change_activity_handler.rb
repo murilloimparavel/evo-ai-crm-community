@@ -21,7 +21,7 @@ module StatusChangeActivityHandler
   end
 
   def status_activity_message_params(from_status, to_status, actor, event_id)
-    actor_type, actor_name, actor_id, execution_source = actor
+    actor_type, actor_name, _, execution_source = actor
     content = status_change_activity_content(to_status, actor_type, actor_name, Current.executed_by)
     activity_event = status_activity_event(from_status, to_status, actor, event_id)
     status_change = status_change_attributes(event_id, from_status, to_status, actor, execution_source)
@@ -37,8 +37,14 @@ module StatusChangeActivityHandler
       target: { type: 'conversation', id: id.to_s },
       changes: { from: from_status.to_s, to: to_status.to_s }
     )
-    event[:actor] = { type: actor_type, id: actor_id&.to_s, name: actor_name, source: execution_source }
+    event[:actor] = status_activity_event_actor(actor_type, actor_name, actor_id, execution_source)
     event
+  end
+
+  def status_activity_event_actor(actor_type, actor_name, actor_id, execution_source)
+    return activity_event_actor(actor_name) if Current.executed_by.is_a?(AutomationRule)
+
+    { type: actor_type, id: actor_id&.to_s, name: actor_name, source: execution_source }
   end
 
   def status_change_attributes(event_id, from_status, to_status, actor, execution_source)

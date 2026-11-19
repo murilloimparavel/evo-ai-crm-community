@@ -49,6 +49,13 @@ RSpec.describe ActivityMessageHandler do
       from: 'open', to: 'resolved', actor: { type: 'user', id: user.id, name: user.name },
       execution_source: 'User'
     )
+    expect(message_params.dig(:content_attributes, :activity_event)).to include(
+      event_id: message_params[:activity_event_id],
+      action: 'status_changed',
+      actor: hash_including(type: 'user', id: user.id.to_s, name: user.name),
+      target: { type: 'conversation', id: conversation.id.to_s },
+      changes: { from: 'open', to: 'resolved' }
+    )
   end
 
   it 'attributes an AutomationRule status change to the system' do
@@ -95,6 +102,22 @@ RSpec.describe ActivityMessageHandler do
     expect(Conversations::ActivityMessageJob).not_to receive(:perform_later)
 
     conversation.update!(status: :open)
+  end
+
+  it 'records the actor and assignee for assignment and removal activities' do
+    Current.user = user
+    jobs = capture_activity_jobs
+
+    conversation.update!(assignee: user)
+    conversation.update!(assignee: nil)
+
+    expect(jobs.map { |params| params.dig(:content_attributes, :activity_event, :action) }).to eq(
+      %w[assignee_assigned assignee_removed]
+    )
+    assigned = jobs.first.dig(:content_attributes, :activity_event)
+    expect(assigned[:actor]).to include(type: 'user', id: user.id.to_s, name: user.name)
+    expect(assigned[:target]).to include(type: 'user', id: user.id.to_s, name: user.name)
+    expect(jobs.map { |params| params[:activity_event_id] }.uniq.size).to eq(2)
   end
 
   it 'logs a rejected enqueue instead of claiming success' do

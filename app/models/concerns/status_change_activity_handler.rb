@@ -23,9 +23,17 @@ module StatusChangeActivityHandler
   def status_activity_message_params(from_status, to_status, actor, event_id)
     actor_type, actor_name, actor_id, execution_source = actor
     content = status_change_activity_content(to_status, actor_type, actor_name, Current.executed_by)
-    activity_message_params(content).merge(
-      activity_event_id: event_id,
+    activity_event = activity_event_payload(
+      action: 'status_changed',
+      actor_name: actor_name,
+      event_id: event_id,
+      actor: { type: actor_type, id: actor_id&.to_s, name: actor_name, source: execution_source },
+      target: { type: 'conversation', id: id.to_s },
+      changes: { from: from_status.to_s, to: to_status.to_s }
+    )
+    activity_message_params(content, activity_event: activity_event).merge(
       content_attributes: {
+        activity_event: activity_event,
         status_change: {
           event_id: event_id,
           from: from_status.to_s,

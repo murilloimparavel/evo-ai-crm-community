@@ -1,6 +1,13 @@
 class AsyncDispatcher < BaseDispatcher
   def dispatch(event_name, timestamp, data)
-    EventDispatcherJob.perform_later(event_name, timestamp, data)
+    job = EventDispatcherJob.perform_later(event_name, timestamp, data)
+    return job unless conversation_status_event?(event_name)
+
+    log_conversation_event_enqueue(event_name, data, job)
+    job
+  rescue StandardError => e
+    log_conversation_event_enqueue_failure(event_name, data, e) if conversation_status_event?(event_name)
+    raise
   end
 
   def publish_event(event_name, timestamp, data)
@@ -25,6 +32,34 @@ class AsyncDispatcher < BaseDispatcher
       WhatsappSyncListener.instance,
       ZapiSyncListener.instance
     ]
+  end
+
+  private
+
+  def conversation_status_event?(event_name)
+    %w[
+      conversation_updated conversation_status_changed conversation_resolved conversation_opened
+      conversation.updated conversation.status_changed conversation.resolved conversation.opened
+    ].include?(event_name.to_s)
+  end
+
+  def conversation_id_from_event(data)
+    conversation = data[:conversation] || data['conversation'] if data.respond_to?(:[])
+    conversation&.id || data[:conversation_id] || data['conversation_id'] if data.respond_to?(:[])
+  end
+
+  def log_conversation_event_enqueue(event_name, data, job)
+    status = job&.successfully_enqueued? ? 'enqueued' : 'enqueue_rejected'
+    log_level = status == 'enqueued' ? :info : :error
+    details = "[EventDispatcher] #{status} event=#{event_name} " \
+              "conversation_id=#{conversation_id_from_event(data)} job_id=#{job&.job_id}"
+    Rails.logger.public_send(log_level, details)
+  end
+
+  def log_conversation_event_enqueue_failure(event_name, data, error)
+    Rails.logger.error(
+      "[EventDispatcher] enqueue_failed event=#{event_name} conversation_id=#{conversation_id_from_event(data)} error=#{error.class}"
+    )
   end
 end
 

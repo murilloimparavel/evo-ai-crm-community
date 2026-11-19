@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_11_10_140000) do
+ActiveRecord::Schema[7.1].define(version: 2026_11_18_162000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1073,6 +1073,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_10_140000) do
     t.integer "sentiment", default: 0, null: false
     t.integer "source", default: 0, null: false
     t.uuid "followup_execution_id"
+    t.uuid "activity_event_id"
     t.index ["content"], name: "index_messages_on_content", opclass: :gin_trgm_ops, using: :gin
     t.index ["conversation_id", "created_at"], name: "idx_messages_conv_created_desc", order: { created_at: :desc }
     t.index ["conversation_id", "created_at"], name: "idx_messages_conv_created_incoming_desc", order: { created_at: :desc }, where: "(message_type = 0)"
@@ -1081,6 +1082,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_11_10_140000) do
     t.index ["followup_execution_id"], name: "index_messages_on_followup_execution_id", unique: true
     t.index ["inbox_id", "content_type", "created_at"], name: "index_messages_for_type_date_inbox"
     t.index ["inbox_id"], name: "index_messages_on_inbox_id"
+    t.index ["activity_event_id"], name: "idx_messages_activity_event_id_unique", unique: true, where: "(activity_event_id IS NOT NULL)"
     t.index ["sender_type", "sender_id"], name: "index_messages_on_sender_type_and_sender_id"
     t.index ["source_id"], name: "index_messages_on_source_id"
   end

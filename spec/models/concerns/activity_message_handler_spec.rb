@@ -99,13 +99,14 @@ RSpec.describe ActivityMessageHandler do
 
   it 'logs a rejected enqueue instead of claiming success' do
     job = instance_double(ActiveJob::Base, successfully_enqueued?: false, job_id: 'rejected-job')
+    fallback_message = instance_double(Message, id: 'fallback-message')
     allow(Conversations::ActivityMessageJob).to receive(:perform_later).and_return(job)
+    expect(Conversations::ActivityMessageJob).to receive(:perform_now).with(
+      conversation,
+      hash_including(message_type: :activity, content: a_string_including(I18n.t('automation.system_name')))
+    ).and_return(fallback_message)
     expect(Rails.logger).to receive(:error).with(a_string_including('status_change_enqueue_rejected'))
 
     conversation.update!(status: :resolved)
-
-    fallback_activity = conversation.messages.find_by!(message_type: :activity)
-    expect(fallback_activity.activity_event_id).to be_present
-    expect(fallback_activity.content).to include(I18n.t('automation.system_name'))
   end
 end

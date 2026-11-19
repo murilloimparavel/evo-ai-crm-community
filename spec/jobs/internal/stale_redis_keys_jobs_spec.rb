@@ -1,6 +1,6 @@
 require 'rails_helper'
 
-RSpec.describe 'Stale Redis presence cleanup' do
+RSpec.describe Internal::RemoveStaleRedisKeysJob do
   it 'enqueues the cleanup without an argument' do
     expect { Internal::RemoveStaleRedisKeysJob.perform_now }
       .to have_enqueued_job(Internal::ProcessStaleRedisKeysJob).with(no_args)

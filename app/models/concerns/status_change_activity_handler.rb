@@ -13,7 +13,8 @@ module StatusChangeActivityHandler
     event_id = SecureRandom.uuid
     actor = status_change_activity_actor(user_name, Current.executed_by)
     message_params = status_activity_message_params(from_status, to_status, actor, event_id)
-    enqueue_status_activity(message_params, from_status, to_status, actor.first, event_id)
+    context = status_activity_context(from_status, to_status, actor.first, event_id)
+    enqueue_status_activity(message_params, context)
   rescue StandardError => e
     log_status_activity_failure(from_status, to_status, e)
     raise
@@ -36,12 +37,16 @@ module StatusChangeActivityHandler
     )
   end
 
-  def enqueue_status_activity(message_params, from_status, to_status, actor_type, event_id)
+  def enqueue_status_activity(message_params, context)
     job, enqueue_error = enqueue_status_activity_job(message_params)
-    return log_status_activity_enqueued(job, from_status, to_status, actor_type, event_id) if status_activity_enqueued?(job)
+    return log_status_activity_enqueued(job, context) if status_activity_enqueued?(job)
 
-    log_status_activity_rejected(job, enqueue_error, from_status, to_status, actor_type, event_id)
-    persist_status_activity_fallback(message_params, event_id)
+    log_status_activity_rejected(job, enqueue_error, context)
+    persist_status_activity_fallback(message_params, context[:event_id])
+  end
+
+  def status_activity_context(from_status, to_status, actor_type, event_id)
+    { from_status: from_status, to_status: to_status, actor_type: actor_type, event_id: event_id }
   end
 
   def enqueue_status_activity_job(message_params)
@@ -54,17 +59,19 @@ module StatusChangeActivityHandler
     job.respond_to?(:successfully_enqueued?) && job.successfully_enqueued?
   end
 
-  def log_status_activity_enqueued(job, from_status, to_status, actor_type, event_id)
+  def log_status_activity_enqueued(job, context)
     Rails.logger.info(
       "[ConversationActivity] status_change_enqueued conversation_id=#{id} " \
-      "event_id=#{event_id} from=#{from_status} to=#{to_status} actor_type=#{actor_type} job_id=#{job.job_id}"
+      "event_id=#{context[:event_id]} from=#{context[:from_status]} to=#{context[:to_status]} " \
+      "actor_type=#{context[:actor_type]} job_id=#{job.job_id}"
     )
   end
 
-  def log_status_activity_rejected(job, error, from_status, to_status, actor_type, event_id)
+  def log_status_activity_rejected(job, error, context)
     Rails.logger.error(
       "[ConversationActivity] status_change_enqueue_rejected conversation_id=#{id} " \
-      "event_id=#{event_id} from=#{from_status} to=#{to_status} actor_type=#{actor_type} " \
+      "event_id=#{context[:event_id]} from=#{context[:from_status]} to=#{context[:to_status]} " \
+      "actor_type=#{context[:actor_type]} " \
       "job_id=#{job&.job_id} error=#{error&.class}"
     )
   end

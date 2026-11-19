@@ -15,20 +15,6 @@ RSpec.describe 'Conversation status activity', type: :request do
   let(:conversation) do
     Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox, status: :open)
   end
-
-  before do
-    actor = user
-    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do # rubocop:disable RSpec/AnyInstance
-      Current.user = actor
-      Current.evo_can_read_all_inboxes = true
-      Current.evo_permission_cache ||= {}
-      true
-    end
-    allow(EvoExtensionPoints::PermissionResolver).to receive(:allowed?).and_return(true)
-  end
-
-  after { Current.reset }
-
   let(:rule) do
     AutomationRule.new(
       name: "status-activity-#{SecureRandom.hex(4)}",
@@ -43,9 +29,19 @@ RSpec.describe 'Conversation status activity', type: :request do
   end
 
   before do
+    actor = user
+    allow_any_instance_of(Api::BaseController).to receive(:authenticate_request!) do # rubocop:disable RSpec/AnyInstance
+      Current.user = actor
+      Current.evo_can_read_all_inboxes = true
+      Current.evo_permission_cache ||= {}
+      true
+    end
+    allow(EvoExtensionPoints::PermissionResolver).to receive(:allowed?).and_return(true)
     rule.save!(validate: false)
     perform_status_change
   end
+
+  after { Current.reset }
 
   it 'returns success for an authenticated status change' do
     expect(response).to have_http_status(:ok)

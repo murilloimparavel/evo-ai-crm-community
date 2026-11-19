@@ -19,7 +19,9 @@ module BotHandoffActivityMessageHandler
       target: { type: 'conversation', id: id.to_s },
       changes: { from: 'bot', to: 'human' }
     )
-    params = activity_message_params(content, activity_event: event).merge(content_attributes: { handoff_type: 'bot_to_human', activity_event: event })
+    params = activity_message_params(content, activity_event: event).merge(
+      content_attributes: { handoff_type: 'bot_to_human', activity_event: event }
+    )
     ::Conversations::ActivityMessageJob.perform_later(self, params)
   end
 
@@ -35,7 +37,9 @@ module BotHandoffActivityMessageHandler
       target: { type: 'conversation', id: id.to_s },
       changes: { from: 'human', to: 'bot' }
     )
-    params = activity_message_params(content, activity_event: event).merge(content_attributes: { handoff_type: 'human_to_bot', activity_event: event })
+    params = activity_message_params(content, activity_event: event).merge(
+      content_attributes: { handoff_type: 'human_to_bot', activity_event: event }
+    )
     ::Conversations::ActivityMessageJob.perform_later(self, params)
   end
 end

@@ -137,6 +137,40 @@ RSpec.describe ActivityMessageHandler do
     expect(events.find { |event| event[:action] == 'priority_changed' }[:changes]).to eq(from: 0, to: 3)
   end
 
+  it 'uses the automation rule consistently in the content and structured actor' do
+    target_user = User.create!(name: 'Assigned Agent', email: "assigned-#{SecureRandom.hex(4)}@test.com")
+    rule = AutomationRule.create!(
+      name: "Assign conversation #{SecureRandom.hex(3)}", event_name: 'conversation_updated',
+      conditions: [], actions: [], active: true
+    )
+    Current.user = user
+    Current.executed_by = rule
+    jobs = capture_activity_jobs
+
+    conversation.update!(assignee: target_user)
+
+    params = jobs.fetch(0)
+    event = params.dig(:content_attributes, :activity_event)
+    expect(event[:actor]).to include(type: 'automation', id: rule.id.to_s, name: rule.name)
+    expect(params[:content]).to include(I18n.t('automation.system_name'))
+    expect(params[:content]).not_to include(user.name)
+  end
+
+  it 'uses the contact consistently in the content and structured actor' do
+    target_user = User.create!(name: 'Assigned Agent', email: "assigned-#{SecureRandom.hex(4)}@test.com")
+    Current.user = user
+    Current.executed_by = contact
+    jobs = capture_activity_jobs
+
+    conversation.update!(assignee: target_user)
+
+    params = jobs.fetch(0)
+    event = params.dig(:content_attributes, :activity_event)
+    expect(event[:actor]).to include(type: 'contact', id: contact.id.to_s, name: contact.name)
+    expect(params[:content]).to include(contact.name)
+    expect(params[:content]).not_to include(user.name)
+  end
+
   it 'logs a rejected enqueue instead of claiming success' do
     job = instance_double(ActiveJob::Base, successfully_enqueued?: false, job_id: 'rejected-job')
     fallback_message = instance_double(Message, id: 'fallback-message')

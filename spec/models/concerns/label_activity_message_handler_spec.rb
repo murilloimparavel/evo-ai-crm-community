@@ -40,10 +40,14 @@ RSpec.describe LabelActivityMessageHandler do
       activities = captured_activity_params
       conversation.send(:create_label_added, user.name, [label.id])
 
-      expect(activities.map { |activity| activity[:content] }).to include(a_string_matching(/#{Regexp.escape(label.title)}/))
-      expect(activities.map { |activity| activity[:content] }).not_to include(a_string_matching(/#{Regexp.escape(label.id)}/))
+      contents = activities.map { |activity| activity[:content] }
+      expect(contents).to include(a_string_matching(/#{Regexp.escape(label.title)}/))
+      expect(contents).not_to include(a_string_matching(/#{Regexp.escape(label.id)}/))
       event = activities.last.dig(:content_attributes, :activity_event)
-      expect(event).to include(action: 'labels_added', target: { type: 'labels', ids: [label.id], names: [label.title] })
+      expect(event).to include(
+        action: 'labels_added',
+        target: { type: 'labels', ids: [label.id], names: [label.title] }
+      )
       expect(activities.last[:activity_event_id]).to eq(event[:event_id])
     end
 

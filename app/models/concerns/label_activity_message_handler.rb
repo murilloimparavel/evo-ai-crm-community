@@ -26,7 +26,7 @@ module LabelActivityMessageHandler
       target: { type: 'labels', ids: ids, names: resolved },
       changes: { added: change_type == 'added' ? resolved : [], removed: change_type == 'removed' ? resolved : [] }
     )
-    ::Conversations::ActivityMessageJob.perform_later(self, activity_message_params(content, activity_event: event)) if content
+    enqueue_activity_event(content, event)
   end
 
   # Defense-in-depth at the render boundary. The primary write paths that fed

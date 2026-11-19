@@ -32,4 +32,27 @@ RSpec.describe PipelineClassification::ModelHooks do
       described_class.message_created(message)
     end
   end
+
+  describe '.conversation_updated' do
+    let(:attributes) { {} }
+    let(:target) { instance_double(Conversation) }
+
+    it 'locks a separate instance so the callback retains its saved status change' do
+      allow(conversation).to receive_messages(id: 'conversation-id', saved_changes: { 'status' => %w[open resolved] },
+                                              saved_change_to_label_list?: false)
+      allow(Conversation).to receive(:find_by).with(id: 'conversation-id').and_return(target)
+      expect(PipelineClassification::Lifecycle).to receive(:invalidate!).with(conversation: target, reason: 'conversation_changed')
+
+      described_class.conversation_updated(conversation)
+    end
+
+    it 'uses a separate instance for classification context changes' do
+      allow(conversation).to receive_messages(id: 'conversation-id', saved_changes: { 'custom_attributes' => [{}, { 'x' => 1 }] },
+                                              saved_change_to_label_list?: false)
+      allow(Conversation).to receive(:find_by).with(id: 'conversation-id').and_return(target)
+      expect(PipelineClassification::Lifecycle).to receive(:context_changed!).with(conversation: target)
+
+      described_class.conversation_updated(conversation)
+    end
+  end
 end

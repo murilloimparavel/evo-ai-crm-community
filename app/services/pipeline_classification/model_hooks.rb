@@ -72,9 +72,13 @@ module PipelineClassification
       changed = conversation.saved_changes.keys.intersect?(fields)
       labels_changed = conversation.respond_to?(:saved_change_to_label_list?) && conversation.saved_change_to_label_list?
       if changed || labels_changed
-        Lifecycle.invalidate!(conversation: conversation, reason: 'conversation_changed')
+        # Lifecycle takes a row lock, which reloads its object and clears saved_changes.
+        # Keep the callback's instance intact for the remaining after-commit handlers.
+        target = Conversation.find_by(id: conversation.id)
+        Lifecycle.invalidate!(conversation: target, reason: 'conversation_changed') if target
       elsif conversation.saved_changes.key?('custom_attributes')
-        Lifecycle.context_changed!(conversation: conversation)
+        target = Conversation.find_by(id: conversation.id)
+        Lifecycle.context_changed!(conversation: target) if target
       end
     end
 

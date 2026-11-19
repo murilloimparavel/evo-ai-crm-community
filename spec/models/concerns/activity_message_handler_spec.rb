@@ -120,6 +120,23 @@ RSpec.describe ActivityMessageHandler do
     expect(jobs.map { |params| params[:activity_event_id] }.uniq.size).to eq(2)
   end
 
+  it 'records team changes and priority changes with structured targets and values' do
+    Current.user = user
+    jobs = capture_activity_jobs
+    team = Team.create!(name: 'Activity Audit Team')
+
+    conversation.update!(team: team)
+    conversation.update!(team: nil)
+    conversation.update!(priority: :urgent)
+
+    events = jobs.map { |params| params.dig(:content_attributes, :activity_event) }
+    expect(events.map { |event| event[:action] }).to include('team_assigned', 'team_removed', 'priority_changed')
+    expect(events.find { |event| event[:action] == 'team_assigned' }[:target]).to include(
+      type: 'team', id: team.id.to_s, name: team.name
+    )
+    expect(events.find { |event| event[:action] == 'priority_changed' }[:changes]).to eq(from: 0, to: 3)
+  end
+
   it 'logs a rejected enqueue instead of claiming success' do
     job = instance_double(ActiveJob::Base, successfully_enqueued?: false, job_id: 'rejected-job')
     fallback_message = instance_double(Message, id: 'fallback-message')

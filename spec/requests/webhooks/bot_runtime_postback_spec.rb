@@ -44,6 +44,33 @@ RSpec.describe 'Bot Runtime postback handoff marker', type: :request do
       )
     end
 
+    it 'rejects stale handoff without creating an outgoing message' do
+      allow(agent_bot).to receive(:id).and_return('bot-id')
+      allow(BotRuntime::HandoffStaleness).to receive(:new).and_return(instance_double(BotRuntime::HandoffStaleness, stale?: true))
+      post '/webhooks/bot_runtime/postback/3686',
+           params: { content: 'resposta final', force: true, runtime_delivery_id: 'batch:part:0',
+                     source_message_ids: [SecureRandom.uuid], source_agent_bot_id: 'bot-id' }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body['code']).to eq('ERR_STALE_TURN')
+      expect(creator).not_to have_received(:create_bot_reply)
+    end
+
+    it 'propagates stale rejection through signed provenance processing' do
+      allow(agent_bot).to receive(:id).and_return('bot-id')
+      allow(BotRuntime::HandoffStaleness).to receive(:new).and_return(instance_double(BotRuntime::HandoffStaleness, stale?: true))
+      allow(BotRuntime::Config).to receive(:secret).and_return('x' * 32)
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('KNOWLEDGE_RESPONSE_PROVENANCE_ENABLED').and_return('true')
+      allow(KnowledgeRuntime::ResponseProvenance).to receive(:record!).and_yield
+      post '/webhooks/bot_runtime/postback/3686',
+           params: { content: 'resposta final', force: true, runtime_delivery_id: 'batch:part:0',
+                     source_message_ids: [SecureRandom.uuid], source_agent_bot_id: 'bot-id',
+                     knowledge_provenance: 'signed-test-proof' }, headers: { 'X-Bot-Runtime-Secret' => 'x' * 32 }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body['code']).to eq('ERR_STALE_TURN')
+      expect(creator).not_to have_received(:create_bot_reply)
+    end
+
     context 'when a previous request committed but its acknowledgement was lost' do
       let(:existing_reply) { instance_double(Message, id: 'reply-uuid') }
 

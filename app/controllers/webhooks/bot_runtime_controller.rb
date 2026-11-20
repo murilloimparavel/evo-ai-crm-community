@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Webhooks::BotRuntimeController < ActionController::API
+  class StaleHandoff < StandardError; end
   before_action :validate_secret
 
   def postback
@@ -15,6 +16,8 @@ class Webhooks::BotRuntimeController < ActionController::API
 
     message = postback_message(conversation, bot, content, media)
     render_result(message, conversation)
+  rescue StaleHandoff
+    render json: { error: 'Turn no longer current', code: 'ERR_STALE_TURN' }, status: :conflict
   rescue KnowledgeRuntime::ResponseProvenance::Denied
     head :forbidden
   end
@@ -32,6 +35,7 @@ class Webhooks::BotRuntimeController < ActionController::API
       existing = conversation.messages.where(sender: bot)
                              .where("content_attributes ->> 'runtime_delivery_id' = ?", delivery_id).first
       next existing if existing
+      raise StaleHandoff if stale_force_reply?(options, bot, conversation)
 
       attributes = (options[:content_attributes] || {}).merge(runtime_delivery_id: delivery_id)
       AgentBots::MessageCreator.new(bot).create_bot_reply(content, conversation, **options, content_attributes: attributes)
@@ -78,6 +82,20 @@ class Webhooks::BotRuntimeController < ActionController::API
       Rails.logger.warn "[BotRuntime::Postback] Message creation failed: conversation=#{conversation.display_id}"
       render json: { error: 'Message creation failed' }, status: :unprocessable_entity
     end
+  end
+
+  def stale_source_agent?(agent_bot)
+    return false unless params.key?(:source_message_ids)
+
+    params[:source_agent_bot_id].to_s != agent_bot.id.to_s
+  end
+
+  def stale_force_reply?(options, bot, conversation)
+    options[:force] && (stale_source_agent?(bot) || stale_handoff?(conversation))
+  end
+
+  def stale_handoff?(conversation)
+    BotRuntime::HandoffStaleness.new(conversation, params).stale?
   end
 
   VALID_MEDIA_FILE_TYPES = %w[image audio video file].freeze

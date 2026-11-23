@@ -94,6 +94,7 @@ module ConversationSerializer
         id: conversation.inbox.id,
         name: conversation.inbox.name,
         channel_type: conversation.inbox.channel_type,
+        avatar_url: conversation.inbox.avatar_url,
         agent_bot_active: conversation.inbox.active_bot? == true
       }
 

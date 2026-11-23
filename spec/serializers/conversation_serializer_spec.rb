@@ -124,16 +124,19 @@ RSpec.describe ConversationSerializer do
     end
 
     it 'exposes inbox.agent_bot_active=true when Inbox#active_bot? is true' do
-      inbox = double('Inbox', id: 7, name: 'Bot Inbox', channel_type: 'Channel::WebWidget', channel: channel_no_provider, active_bot?: true)
+      inbox = double('Inbox', id: 7, name: 'Bot Inbox', channel_type: 'Channel::WebWidget',
+                              avatar_url: 'https://example.test/inbox-avatar.png',
+                              channel: channel_no_provider, active_bot?: true)
       allow(inbox).to receive(:present?).and_return(true)
 
       result = described_class.serialize(build_conversation(inbox), include_contact: false)
 
-      expect(result['inbox']).to include(agent_bot_active: true)
+      expect(result['inbox']).to include(agent_bot_active: true, avatar_url: 'https://example.test/inbox-avatar.png')
     end
 
     it 'exposes inbox.agent_bot_active=false when Inbox#active_bot? is false' do
-      inbox = double('Inbox', id: 8, name: 'No Bot Inbox', channel_type: 'Channel::WebWidget', channel: channel_no_provider, active_bot?: false)
+      inbox = double('Inbox', id: 8, name: 'No Bot Inbox', channel_type: 'Channel::WebWidget',
+                              avatar_url: nil, channel: channel_no_provider, active_bot?: false)
       allow(inbox).to receive(:present?).and_return(true)
 
       result = described_class.serialize(build_conversation(inbox), include_contact: false)

@@ -55,6 +55,64 @@ RSpec.describe AgentBots::InactivityActionsService do
     end
   end
 
+  describe '#process' do
+    let(:channel) { Channel::Api.create! }
+    let(:inbox) { Inbox.create!(name: 'Cadence process inbox', channel: channel) }
+    let(:contact) { Contact.create!(name: 'Cadence process customer', email: "cadence-process-#{SecureRandom.hex(4)}@example.com") }
+    let(:contact_inbox) { ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8)) }
+    let(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox) }
+    let(:bot) { AgentBot.create!(name: 'Cadence process bot', outgoing_url: 'https://example.test/bot') }
+    let(:cadence) { described_class.new(conversation, bot) }
+
+    it 'does not reserve an inactivity execution while the latest customer message is unanswered' do
+      conversation.messages.create!(inbox: inbox, message_type: :incoming, content: 'Paguei', created_at: 6.minutes.ago)
+
+      allow(cadence).to receive(:should_process?).and_return(true)
+      allow(cadence).to receive(:get_sorted_actions).and_return([{ 'minutes' => 1, 'action' => 'interact' }])
+      allow(cadence).to receive(:calculate_inactive_time_minutes).and_return(10)
+      allow(cadence).to receive(:cycle_started_after_activation?).and_return(true)
+      expect(InactivityActionExecution).not_to receive(:for_conversation)
+
+      cadence.process
+    end
+  end
+
+  describe '#urgent_followup_prompt' do
+    it 'does not claim a transfer or expose internal agents' do
+      prompt = service.send(:urgent_followup_prompt, 'check the payment', 'Cliente: paguei')
+
+      expect(prompt).to include('Do not claim you verified, transferred, assigned, escalated, or completed anything')
+      expect(prompt).to include('Do not mention internal agents')
+      expect(prompt).to include('ask the customer a concise question')
+    end
+  end
+
+  describe '#latest_customer_message_has_public_reply?' do
+    let(:channel) { Channel::Api.create! }
+    let(:inbox) { Inbox.create!(name: 'Cadence reply inbox', channel: channel) }
+    let(:contact) { Contact.create!(name: 'Cadence reply customer', email: "cadence-reply-#{SecureRandom.hex(4)}@example.com") }
+    let(:contact_inbox) { ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8)) }
+    let(:conversation) { Conversation.create!(inbox: inbox, contact: contact, contact_inbox: contact_inbox) }
+    let(:cadence) { described_class.new(conversation, AgentBot.new) }
+    let(:incoming) do
+      conversation.messages.create!(inbox: inbox, message_type: :incoming, content: 'Paguei', created_at: 6.minutes.ago)
+    end
+
+    it 'does not count a failed public outgoing message as a reply' do
+      conversation.messages.create!(inbox: inbox, message_type: :outgoing, status: :failed, content: 'Vou verificar',
+                                    created_at: 5.minutes.ago)
+
+      expect(cadence.send(:latest_customer_message_has_public_reply?, incoming)).to be(false)
+    end
+
+    it 'counts a successfully sent public template as a reply' do
+      conversation.messages.create!(inbox: inbox, message_type: :template, status: :sent, content: 'Confirmação enviada',
+                                    created_at: 5.minutes.ago)
+
+      expect(cadence.send(:latest_customer_message_has_public_reply?, incoming)).to be(true)
+    end
+  end
+
   describe '#reserve_execution' do
     let(:channel) { Channel::Api.create! }
     let(:inbox) { Inbox.create!(name: 'Cadence test inbox', channel: channel) }

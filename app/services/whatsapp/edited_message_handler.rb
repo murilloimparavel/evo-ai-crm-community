@@ -31,12 +31,16 @@ class Whatsapp::EditedMessageHandler
   end
 
   def update_original(original, content)
-    return false unless original&.incoming? && content.present?
+    return false unless eligible_message?(original, content)
     return true if original.content == content && original.content_attributes&.dig('is_edited')
 
     original.update!(content: content, content_attributes: (original.content_attributes || {}).merge(
       'is_edited' => true,
       'previous_content' => original.content
     ))
+  end
+
+  def eligible_message?(original, content)
+    original&.incoming? && content.present?
   end
 end

@@ -3,7 +3,7 @@ class Webhooks::InstagramEventsJob < MutexApplicationJob
   retry_on LockAcquisitionError, wait: 1.second, attempts: 8
 
   # @return [Array] We will support further events like reaction or seen in future
-  SUPPORTED_EVENTS = [:message, :read].freeze
+  SUPPORTED_EVENTS = [:message, :message_edit, :read].freeze
 
   def perform(entries)
     @entries = entries
@@ -48,7 +48,7 @@ class Webhooks::InstagramEventsJob < MutexApplicationJob
       Rails.logger.info("Instagram Events Job Messaging[#{index}]: #{messaging_indifferent.inspect}")
       Rails.logger.info("Instagram Events Job Messaging[#{index}] keys: #{messaging_indifferent.keys.inspect}")
 
-      # Skip unsupported events like message_edit, reactions, etc.
+      # Skip unsupported events like reactions, postbacks, etc.
       if unsupported_event?(messaging_indifferent)
         Rails.logger.info("Instagram Events Job: Skipping unsupported event type: #{messaging_indifferent.keys.inspect}")
         next
@@ -105,11 +105,12 @@ class Webhooks::InstagramEventsJob < MutexApplicationJob
 
   def unsupported_event?(messaging)
     # Check if this is an unsupported event type (like message_edit, reaction, etc.)
-    # These events don't have sender/recipient and should be skipped
+    # These events don't have sender/recipient and should be resolved using the
+    # Instagram account id from the entry instead.
     return false unless messaging.is_a?(Hash)
 
     messaging_indifferent = messaging.with_indifferent_access
-    unsupported_keys = [:message_edit, :reaction, :postback, :account_linking]
+    unsupported_keys = [:reaction, :postback, :account_linking]
     unsupported_keys.any? { |key| messaging_indifferent.key?(key) }
   end
 
@@ -167,6 +168,10 @@ class Webhooks::InstagramEventsJob < MutexApplicationJob
       messaging_array.each do |messaging|
         # Skip unsupported events
         next if unsupported_event?(messaging.with_indifferent_access)
+
+        # message_edit events can omit sender/recipient, but are supported and
+        # still need channel-level processing.
+        next if messaging.with_indifferent_access.key?(:message_edit)
 
         # Return sender id if available
         if messaging[:sender]&.dig(:id).present?
@@ -226,6 +231,24 @@ class Webhooks::InstagramEventsJob < MutexApplicationJob
   def read(messaging, channel)
     # Use a single service to handle read status for both channel types since the params are same
     ::Instagram::ReadStatusService.new(params: messaging, channel: channel).perform
+  end
+
+  def message_edit(messaging, channel)
+    edit = messaging[:message_edit]
+    return if edit.blank?
+
+    message_id = edit[:mid] || edit[:message_id] || edit[:id] || messaging.dig(:message, :mid)
+    edited_text = edit[:text] || edit.dig(:message, :text) || messaging.dig(:message, :text)
+    edited_text = edited_text[:body] || edited_text['body'] if edited_text.is_a?(Hash)
+    return if message_id.blank? || edited_text.blank?
+
+    original = Message.joins(:inbox).where(source_id: message_id.to_s, inboxes: { channel: channel }).first
+    return unless original&.incoming?
+    return if original.content == edited_text && original.content_attributes&.dig('is_edited')
+
+    original.update!(content: edited_text, content_attributes: (original.content_attributes || {}).merge(
+      'is_edited' => true, 'previous_content' => original.content
+    ))
   end
 
   def messages(entry)

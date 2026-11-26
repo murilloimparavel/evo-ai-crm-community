@@ -23,6 +23,7 @@ class Whatsapp::IncomingMessageBaseService
     # message in the standard messages webhook. It identifies the original
     # message via revoke.original_message_id; it is not a new chat message.
     return process_revoked_message if message_type == 'revoke'
+    return process_edited_message if %w[edited_message edit].include?(message_type.to_s)
 
     # Ephemeral wrappers and service-only requests do not represent a customer
     # message. Reactions and unknown payloads are persisted with a readable
@@ -46,6 +47,31 @@ class Whatsapp::IncomingMessageBaseService
     ensure
       clear_message_source_id_from_redis
     end
+  end
+
+  # Coexistence edit events reference the original WhatsApp message id. Update
+  # the existing record so message.updated is broadcast through the usual path.
+  def process_edited_message
+    message = @processed_params[:messages].first
+    original_id = payload_value(message, :edited_message, :original_message_id) ||
+                  payload_value(message, :edit, :original_message_id) ||
+                  payload_value(message, :context, :id)
+    return if original_id.blank?
+
+    original = inbox.messages.find_by(source_id: original_id.to_s)
+    return false unless original&.incoming?
+
+    edited_content = payload_value(message, :edited_message, :text, :body) ||
+                     payload_value(message, :edited_message, :body) ||
+                     payload_value(message, :edit, :text, :body) ||
+                     payload_value(message, :text, :body)
+    edited_content = payload_value(message, :edited_message, :text) if edited_content.is_a?(Hash)
+    return false if edited_content.blank?
+    return true if original.content == edited_content && original.content_attributes&.dig('is_edited')
+
+    original.update!(content: edited_content, content_attributes: (original.content_attributes || {}).merge(
+      'is_edited' => true, 'previous_content' => original.content
+    ))
   end
 
   def process_revoked_message

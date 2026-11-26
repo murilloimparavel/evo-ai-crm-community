@@ -21,7 +21,9 @@ RSpec.describe PipelineItemSerializer do
     it 'returns only the latest movement timestamp for each item' do
       item = create_item
       another_item = create_item
-      item.stage_movements.update_all(created_at: 4.days.ago, updated_at: 4.days.ago)
+      item.stage_movements.each do |movement|
+        movement.update!(created_at: 4.days.ago, updated_at: 4.days.ago)
+      end
       latest_movement = StageMovement.create!(
         pipeline_item: item,
         from_stage: first_stage,
@@ -62,7 +64,9 @@ RSpec.describe PipelineItemSerializer do
     it 'uses the batched movement timestamp to calculate days in the current stage' do
       travel_to(Time.zone.local(2026, 1, 10, 12, 0, 0)) do
         item = create_item
-        StageMovement.where(pipeline_item: item).update_all(created_at: 3.days.ago)
+        StageMovement.where(pipeline_item: item).each do |movement|
+          movement.update!(created_at: 3.days.ago, updated_at: 3.days.ago)
+        end
         movement_times = described_class.latest_stage_movement_times_for([item])
         expect(item).not_to receive(:days_in_current_stage)
 

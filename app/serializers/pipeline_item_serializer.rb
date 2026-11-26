@@ -48,9 +48,26 @@ module PipelineItemSerializer
     end
   end
 
+  # Fetch only the latest movement timestamp per item in one grouped query. Loading
+  # every movement for a large board wastes memory, while looking up the latest
+  # movement separately for every item creates an N+1.
+  #
+  # @param items [Array<PipelineItem>, ActiveRecord::Relation]
+  # @return [Hash{String => Time}] item_id => latest movement timestamp
+  def latest_stage_movement_times_for(items)
+    item_ids = items.map(&:id)
+    return {} if item_ids.empty?
+
+    StageMovement.where(pipeline_item_id: item_ids)
+                 .group(:pipeline_item_id)
+                 .maximum(:created_at)
+  end
+
   def serialize(pipeline_item, include_entity: false, include_tasks_info: false,
                 include_services_info: false, include_labels: false,
-                labels_by_title: nil, labels_by_id: nil, task_counts_by_item: nil)
+                labels_by_title: nil, labels_by_id: nil, task_counts_by_item: nil,
+                stage_movement_times: nil, conversation_unread_counts: nil,
+                last_non_activity_messages: nil)
     is_orphaned = if pipeline_item.conversation_id.present?
                     !pipeline_item.conversation.present?
                   elsif pipeline_item.contact_id.present?
@@ -73,7 +90,7 @@ module PipelineItemSerializer
       entered_at: pipeline_item.entered_at&.to_i,
       completed_at: pipeline_item.completed_at&.to_i,
       days_in_pipeline: pipeline_item.days_in_pipeline,
-      days_in_current_stage: pipeline_item.days_in_current_stage,
+      days_in_current_stage: serialized_days_in_current_stage(pipeline_item, stage_movement_times),
       created_at: pipeline_item.created_at&.to_i,
       updated_at: pipeline_item.updated_at&.iso8601,
       is_orphaned: is_orphaned
@@ -86,7 +103,9 @@ module PipelineItemSerializer
         include_messages: false,
         include_labels: include_labels,
         labels_by_title: labels_by_title,
-        labels_by_id: labels_by_id
+        labels_by_id: labels_by_id,
+        unread_counts: conversation_unread_counts,
+        last_non_activity_messages: last_non_activity_messages
       )
       result[:conversation]['uuid'] = pipeline_item.conversation.uuid
       if pipeline_item.conversation.association(:contact).loaded? && pipeline_item.conversation.contact
@@ -160,6 +179,13 @@ module PipelineItemSerializer
     end
 
     result
+  end
+
+  def serialized_days_in_current_stage(pipeline_item, stage_movement_times)
+    return pipeline_item.days_in_current_stage unless stage_movement_times
+
+    start_time = stage_movement_times[pipeline_item.id] || pipeline_item.entered_at
+    ((Time.current - start_time) / 1.day).round
   end
 
   # Serialize collection of PipelineItems

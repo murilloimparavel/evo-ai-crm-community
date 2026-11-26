@@ -104,7 +104,7 @@ class Webhooks::InstagramEventsJob < MutexApplicationJob
   end
 
   def unsupported_event?(messaging)
-    # Check if this is an unsupported event type (like message_edit, reaction, etc.)
+    # Check if this is an unsupported event type (like reaction, etc.)
     # These events don't have sender/recipient and should be resolved using the
     # Instagram account id from the entry instead.
     return false unless messaging.is_a?(Hash)
@@ -234,21 +234,7 @@ class Webhooks::InstagramEventsJob < MutexApplicationJob
   end
 
   def message_edit(messaging, channel)
-    edit = messaging[:message_edit]
-    return if edit.blank?
-
-    message_id = edit[:mid] || edit[:message_id] || edit[:id] || messaging.dig(:message, :mid)
-    edited_text = edit[:text] || edit.dig(:message, :text) || messaging.dig(:message, :text)
-    edited_text = edited_text[:body] || edited_text['body'] if edited_text.is_a?(Hash)
-    return if message_id.blank? || edited_text.blank?
-
-    original = Message.joins(:inbox).where(source_id: message_id.to_s, inboxes: { channel: channel }).first
-    return unless original&.incoming?
-    return if original.content == edited_text && original.content_attributes&.dig('is_edited')
-
-    original.update!(content: edited_text, content_attributes: (original.content_attributes || {}).merge(
-      'is_edited' => true, 'previous_content' => original.content
-    ))
+    Instagram::MessageEditService.new(messaging: messaging, channel: channel).perform
   end
 
   def messages(entry)

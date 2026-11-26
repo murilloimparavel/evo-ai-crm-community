@@ -96,8 +96,8 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
   end
 
   it 'routes edited_message Cloud API webhook payloads through the inbound message handler' do
-    inbox = channel.inbox
-    original = double('Message', incoming?: true, content: 'before', content_attributes: {})
+    inbox = Inbox.find_by!(channel: channel)
+    original = instance_double(Message, incoming?: true, content: 'before', content_attributes: {})
     allow(inbox.messages).to receive(:find_by).with(source_id: 'wamid.original').and_return(original)
     expect(original).to receive(:update!).with(
       content: 'after', content_attributes: { 'is_edited' => true, 'previous_content' => 'before' }
@@ -105,8 +105,19 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
 
     described_class.new.perform(
       object: 'whatsapp_business_account',
-      entry: [{ id: waba_id, changes: [{ field: 'messages', value: { metadata: { phone_number_id: channel.provider_config['phone_number_id'] },
-        messages: [{ id: 'wamid.event', type: 'edited_message', edited_message: { original_message_id: 'wamid.original', text: { body: 'after' } } }] } }] }]
+      entry: [{
+        id: waba_id,
+        changes: [{
+          field: 'messages',
+          value: {
+            metadata: { phone_number_id: channel.provider_config['phone_number_id'] },
+            messages: [{
+              id: 'wamid.event', type: 'edited_message',
+              edited_message: { original_message_id: 'wamid.original', text: { body: 'after' } }
+            }]
+          }
+        }]
+      }]
     )
   end
 

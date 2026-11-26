@@ -182,15 +182,25 @@ RSpec.describe 'WhatsApp revoke handling (EVO-1748 / EVO-1890)' do
     let(:cloud_service) do
       Whatsapp::IncomingMessageWhatsappCloudService.new(
         inbox: cloud_inbox,
-        params: { entry: [{ changes: [{ value: { messages: [{ type: 'edited_message',
-          edited_message: { original_message_id: original_id, text: { body: 'Texto revisado' } } }] } }] }] }
+        params: {
+          entry: [{
+            changes: [{
+              value: {
+                messages: [{
+                  type: 'edited_message',
+                  edited_message: { original_message_id: original_id, text: { body: 'Texto revisado' } }
+                }]
+              }
+            }]
+          }]
+        }
       )
     end
     let(:original_id) { 'wamid.original-edit-id' }
 
     it 'updates the original inbound message without creating another message' do
-      original = double('Message', incoming?: true, content: 'Texto antigo', content_attributes: {})
-      messages = double('messages')
+      original = instance_double(Message, incoming?: true, content: 'Texto antigo', content_attributes: {})
+      messages = instance_double(ActiveRecord::Associations::CollectionProxy)
       allow(cloud_inbox).to receive(:messages).and_return(messages)
       allow(messages).to receive(:find_by).with(source_id: original_id).and_return(original)
 

@@ -6,6 +6,9 @@ RSpec.describe Conversations::SerializationData do
   let(:channel) { Channel::Api.create! }
   let(:inbox) { Inbox.create!(name: "Serialization #{SecureRandom.hex(4)}", channel: channel) }
   let(:contact) { Contact.create!(name: 'Serialization contact') }
+  let(:user) do
+    User.create!(email: "serialization-#{SecureRandom.hex(6)}@example.com", name: 'Serialization User')
+  end
   let(:contact_inbox) do
     ContactInbox.create!(contact: contact, inbox: inbox, source_id: SecureRandom.hex(8))
   end
@@ -16,6 +19,7 @@ RSpec.describe Conversations::SerializationData do
 
   describe '.unread_counts_for' do
     it 'counts only incoming unread messages newer than the agent last seen time' do
+      conversation.update!(agent_last_seen_at: 1.day.ago)
       Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
                       content: 'new unread', created_at: 2.hours.ago)
       Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
@@ -34,7 +38,7 @@ RSpec.describe Conversations::SerializationData do
       Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
                       content: 'older', created_at: 3.hours.ago)
       latest = Message.create!(inbox: inbox, conversation: conversation, message_type: :outgoing,
-                               content: 'latest', created_at: 2.hours.ago)
+                               sender: user, content: 'latest', created_at: 2.hours.ago)
       Message.create!(inbox: inbox, conversation: conversation, message_type: :activity,
                       content: 'activity', created_at: 1.hour.ago)
 

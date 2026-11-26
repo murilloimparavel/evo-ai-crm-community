@@ -23,6 +23,7 @@ class Whatsapp::IncomingMessageBaseService
     # message in the standard messages webhook. It identifies the original
     # message via revoke.original_message_id; it is not a new chat message.
     return process_revoked_message if message_type == 'revoke'
+    return process_edited_message if %w[edited_message edit].include?(message_type.to_s)
 
     # Ephemeral wrappers and service-only requests do not represent a customer
     # message. Reactions and unknown payloads are persisted with a readable
@@ -46,6 +47,10 @@ class Whatsapp::IncomingMessageBaseService
     ensure
       clear_message_source_id_from_redis
     end
+  end
+
+  def process_edited_message
+    Whatsapp::EditedMessageHandler.new(inbox: inbox, payload: @processed_params[:messages].first).perform
   end
 
   def process_revoked_message

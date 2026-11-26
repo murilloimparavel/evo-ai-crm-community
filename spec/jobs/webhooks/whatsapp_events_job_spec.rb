@@ -95,6 +95,29 @@ RSpec.describe Webhooks::WhatsappEventsJob, type: :job do
     expect(template.reload.settings['status']).to eq('PENDING')
   end
 
+  it 'routes Cloud API message events to the Cloud API inbound service' do
+    inbox = channel.inbox
+    payload = {
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: waba_id,
+        changes: [{
+          field: 'messages',
+          value: {
+            metadata: { phone_number_id: channel.provider_config['phone_number_id'] },
+            messages: [{ id: 'wamid.event', type: 'edited_message' }]
+          }
+        }]
+      }]
+    }
+    inbound_service = instance_double(Whatsapp::IncomingMessageWhatsappCloudService, perform: true)
+    allow(Whatsapp::IncomingMessageWhatsappCloudService).to receive(:new)
+      .with(inbox: inbox, params: payload).and_return(inbound_service)
+
+    expect(inbound_service).to receive(:perform)
+    described_class.new.send(:handle_message_events, channel, payload)
+  end
+
   # EVO-1717 [Follow-up 6.8]: a WABA can host multiple whatsapp_cloud channels, but
   # Meta's template id (metadata['external_id']) is unique per-WABA. The status
   # update must resolve the template across ALL channels of the WABA, not just the

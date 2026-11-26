@@ -179,6 +179,9 @@ RSpec.describe 'WhatsApp revoke handling (EVO-1748 / EVO-1890)' do
   end
 
   describe 'WhatsApp Cloud API edited message' do
+    let(:cloud_channel) { instance_double(Channel::Whatsapp, provider: 'whatsapp_cloud') }
+    let(:cloud_inbox) { instance_double(Inbox, id: 1, channel: cloud_channel) }
+    let(:original_id) { 'wamid.original-edit-id' }
     let(:cloud_service) do
       Whatsapp::IncomingMessageWhatsappCloudService.new(
         inbox: cloud_inbox,
@@ -196,8 +199,6 @@ RSpec.describe 'WhatsApp revoke handling (EVO-1748 / EVO-1890)' do
         }
       )
     end
-    let(:original_id) { 'wamid.original-edit-id' }
-
     it 'updates the original inbound message without creating another message' do
       original = instance_double(Message, incoming?: true, content: 'Texto antigo', content_attributes: {})
       messages = instance_double(ActiveRecord::Associations::CollectionProxy)

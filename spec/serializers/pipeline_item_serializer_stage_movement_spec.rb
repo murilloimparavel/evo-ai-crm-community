@@ -35,7 +35,7 @@ RSpec.describe PipelineItemSerializer do
 
       result = described_class.latest_stage_movement_times_for([item, another_item])
 
-      expect(result[item.id]).to be_within(1.microsecond).of(latest_movement.created_at)
+      expect(result[item.id]).to be_within(0.000001).of(latest_movement.created_at)
       expect(result[another_item.id]).to be_present
     end
 

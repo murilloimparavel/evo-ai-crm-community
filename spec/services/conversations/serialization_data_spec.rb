@@ -19,15 +19,19 @@ RSpec.describe Conversations::SerializationData do
 
   describe '.unread_counts_for' do
     it 'counts only incoming unread messages newer than the agent last seen time' do
+      unread = Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
+                               content: 'new unread')
+      old = Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
+                            content: 'old')
+      read = Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
+                             content: 'read', content_attributes: { 'read' => true })
+      outgoing = Message.create!(inbox: inbox, conversation: conversation, message_type: :outgoing,
+                                 content: 'outgoing')
+      unread.update!(created_at: 2.hours.ago)
+      old.update!(created_at: 2.days.ago)
+      read.update!(created_at: 1.hour.ago)
+      outgoing.update!(created_at: 1.hour.ago)
       conversation.update!(agent_last_seen_at: 1.day.ago)
-      Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
-                      content: 'new unread', created_at: 2.hours.ago)
-      Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
-                      content: 'old', created_at: 2.days.ago)
-      Message.create!(inbox: inbox, conversation: conversation, message_type: :incoming,
-                      content: 'read', content_attributes: { 'read' => true }, created_at: 1.hour.ago)
-      Message.create!(inbox: inbox, conversation: conversation, message_type: :outgoing,
-                      content: 'outgoing', created_at: 1.hour.ago)
 
       expect(described_class.unread_counts_for([conversation.id])).to eq(conversation.id => 1)
     end

@@ -283,15 +283,9 @@ class Api::V1::PipelinesController < Api::V1::BaseController
                                 :contact,
                                 :assignee,
                                 :team,
-                                :inbox,
-                                messages: [:attachments, :sender]
+                                :inbox
                               ]
                             ]
-                          )
-                          .preload(
-                            pipeline_items: {
-                              conversation: :messages
-                            }
                           )
                           .find(params[:id])
   end

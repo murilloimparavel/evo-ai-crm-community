@@ -67,6 +67,10 @@ module PipelineSerializer
         item_task_counts = if include_tasks_info
                              task_counts_by_item || PipelineItemSerializer.task_counts_for(active_items)
                            end
+        item_stage_movement_times = PipelineItemSerializer.latest_stage_movement_times_for(active_items)
+        conversation_ids = active_items.filter_map(&:conversation_id)
+        conversation_unread_counts = Conversations::SerializationData.unread_counts_for(conversation_ids)
+        last_non_activity_messages = Conversations::SerializationData.last_non_activity_messages_for(conversation_ids)
 
         serialized_items = active_items.map do |item|
           PipelineItemSerializer.serialize(
@@ -77,7 +81,10 @@ module PipelineSerializer
             include_labels: include_labels,
             labels_by_title: labels_by_title,
             labels_by_id: labels_by_id,
-            task_counts_by_item: item_task_counts
+            task_counts_by_item: item_task_counts,
+            stage_movement_times: item_stage_movement_times,
+            conversation_unread_counts: conversation_unread_counts,
+            last_non_activity_messages: last_non_activity_messages
           )
         end
 

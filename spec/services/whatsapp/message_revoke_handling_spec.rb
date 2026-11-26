@@ -196,7 +196,7 @@ RSpec.describe 'WhatsApp revoke handling (EVO-1748 / EVO-1890)' do
               }
             }]
           }]
-        }
+        }.with_indifferent_access
       )
     end
 

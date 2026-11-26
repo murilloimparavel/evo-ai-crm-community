@@ -4,32 +4,32 @@ module Conversations
   # Batch data used by ConversationSerializer so large conversation collections
   # do not issue one unread-count or latest-message query per conversation.
   module SerializationData
-    UNREAD_COUNTS_SQL = <<~SQL.freeze
+    UNREAD_COUNTS_SQL = <<~SQL.squish
       SELECT c.id AS conversation_id,
              (
                SELECT COUNT(*)
                FROM messages m
                WHERE m.conversation_id = c.id
-                 AND m.message_type = %{incoming_type}
+                 AND m.message_type = %<incoming_type>s
                  AND m.created_at > COALESCE(c.agent_last_seen_at, to_timestamp(0))
                  AND (m.content_attributes->>'read') IS DISTINCT FROM 'true'
              )::integer AS unread_count
       FROM conversations c
-      WHERE c.id IN (%{conversation_ids})
+      WHERE c.id IN (%<conversation_ids>s)
     SQL
 
-    LAST_NON_ACTIVITY_MESSAGES_SQL = <<~SQL.freeze
+    LAST_NON_ACTIVITY_MESSAGES_SQL = <<~SQL.squish
       SELECT c.id AS conversation_id, m.id AS message_id
       FROM conversations c
       LEFT JOIN LATERAL (
         SELECT messages.id
         FROM messages
         WHERE messages.conversation_id = c.id
-          AND messages.message_type != %{activity_type}
+          AND messages.message_type != %<activity_type>s
         ORDER BY messages.created_at DESC, messages.id DESC
         LIMIT 1
       ) m ON TRUE
-      WHERE c.id IN (%{conversation_ids})
+      WHERE c.id IN (%<conversation_ids>s)
         AND m.id IS NOT NULL
     SQL
 
@@ -39,7 +39,7 @@ module Conversations
       return {} if conversation_ids.blank?
 
       connection = ActiveRecord::Base.connection
-      sql = format(UNREAD_COUNTS_SQL.squish,
+      sql = format(UNREAD_COUNTS_SQL,
                    incoming_type: Message.message_types[:incoming],
                    conversation_ids: quoted_uuid_list(conversation_ids, connection))
 
@@ -53,7 +53,7 @@ module Conversations
       return {} if conversation_ids.blank?
 
       connection = ActiveRecord::Base.connection
-      sql = format(LAST_NON_ACTIVITY_MESSAGES_SQL.squish,
+      sql = format(LAST_NON_ACTIVITY_MESSAGES_SQL,
                    activity_type: Message.message_types[:activity],
                    conversation_ids: quoted_uuid_list(conversation_ids, connection))
 

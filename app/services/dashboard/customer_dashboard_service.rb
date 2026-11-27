@@ -325,8 +325,8 @@ module Dashboard
                end
       values = values.transform_keys { |date| date.is_a?(Date) ? date : Date.parse(date.to_s) }
 
-      (@filters.time_range.begin.to_date..@filters.time_range.end.to_date).to_h do |date|
-        [date, values.fetch(date, 0)]
+      (@filters.time_range.begin.to_date..@filters.time_range.end.to_date).index_with do |date|
+        values.fetch(date, 0)
       end
     end
 

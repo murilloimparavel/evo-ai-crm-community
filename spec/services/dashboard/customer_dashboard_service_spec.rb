@@ -21,8 +21,8 @@ RSpec.describe Dashboard::CustomerDashboardService do
     )
     last_contact_inbox = ContactInbox.create!(inbox: inbox, contact: last_contact, source_id: SecureRandom.hex(8))
     last = Conversation.create!(inbox: inbox, contact: last_contact, contact_inbox: last_contact_inbox)
-    first.update_column(:created_at, range_start.beginning_of_day + 10.hours)
-    last.update_column(:created_at, Time.zone.today.beginning_of_day + 10.hours)
+    first.update!(created_at: range_start.beginning_of_day + 10.hours)
+    last.update!(created_at: Time.zone.today.beginning_of_day + 10.hours)
 
     daily = service.send(:daily_metric, Conversation.where(id: [first.id, last.id]), :created_at, :count)
 
@@ -33,8 +33,8 @@ RSpec.describe Dashboard::CustomerDashboardService do
   it 'builds daily response averages across the selected range, using zero for days without events' do
     first = ReportingEvent.create!(name: 'first_response', value: 20)
     second = ReportingEvent.create!(name: 'first_response', value: 40)
-    first.update_column(:created_at, range_start.beginning_of_day + 10.hours)
-    second.update_column(:created_at, range_start.beginning_of_day + 12.hours)
+    first.update!(created_at: range_start.beginning_of_day + 10.hours)
+    second.update!(created_at: range_start.beginning_of_day + 12.hours)
 
     daily = service.send(
       :daily_metric,

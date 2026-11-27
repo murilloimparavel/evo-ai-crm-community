@@ -315,8 +315,9 @@ module Dashboard
     end
 
     def daily_metric(scope, timestamp_column, aggregate, value_column = nil)
-      table_name = scope.klass.table_name
-      date_expression = Arel.sql("DATE(#{table_name}.#{timestamp_column} AT TIME ZONE 'UTC')")
+      timestamp = scope.klass.arel_table[timestamp_column]
+      utc_timestamp = Arel::Nodes::InfixOperation.new('AT TIME ZONE', timestamp, Arel::Nodes.build_quoted('UTC'))
+      date_expression = Arel::Nodes::NamedFunction.new('DATE', [utc_timestamp])
       grouped_scope = scope.group(date_expression)
       values = if aggregate == :average
                  grouped_scope.average(value_column)

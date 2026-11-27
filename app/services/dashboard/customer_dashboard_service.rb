@@ -199,10 +199,9 @@ module Dashboard
     end
 
     def build_trends
-      conversation_trend = scoped_conversations.group_by_day(:created_at, range: @filters.time_range, time_zone: 'UTC').count
-      first_response_trend = scoped_reporting_events.where(name: 'first_response')
-                                                   .group_by_day(:created_at, range: @filters.time_range, time_zone: 'UTC')
-                                                   .average(:value)
+      conversation_trend = daily_metric(scoped_conversations, :created_at, :count)
+      first_response_scope = scoped_reporting_events.where(name: 'first_response')
+      first_response_trend = daily_metric(first_response_scope, :created_at, :average, :value)
       heatmap = build_operation_heatmap
       peak_period_day = conversation_trend.max_by { |_date, count| count.to_i }
 
@@ -312,6 +311,22 @@ module Dashboard
           name: date.strftime('%d/%m'),
           value: value.to_f.round(2)
         }
+      end
+    end
+
+    def daily_metric(scope, timestamp_column, aggregate, value_column = nil)
+      table_name = scope.klass.table_name
+      date_expression = Arel.sql("DATE(#{table_name}.#{timestamp_column} AT TIME ZONE 'UTC')")
+      grouped_scope = scope.group(date_expression)
+      values = if aggregate == :average
+                 grouped_scope.average(value_column)
+               else
+                 grouped_scope.count
+               end
+      values = values.transform_keys { |date| date.is_a?(Date) ? date : Date.parse(date.to_s) }
+
+      (@filters.time_range.begin.to_date..@filters.time_range.end.to_date).to_h do |date|
+        [date, values.fetch(date, 0)]
       end
     end
 
